@@ -210,6 +210,37 @@ To receive real-time price updates, connect to the WebSocket server.
 ]
 ```
 
+**Chart API Manipulation**
+
+- **What changed:** The `/api/charts/klines` endpoint now properly integrates with the internal price manipulation system. Symbol inputs are normalized (accepts `BTCUSDT` or `BTC/USDT`), and the route applies safe fallbacks when manipulation fields are missing or malformed.
+- **Expected manipulation fields (stored on `MarketPrice`):** `startTime`, `endTime`, `endValue`, `originalPrice`, `isActive`.
+- **Behavior:**
+  - If a manipulation is active and the current time is within the manipulation window, the endpoint computes the manipulation progress and scales the returned OHLCV candles so the chart smoothly leads to the current manipulated price.
+  - If fields like `originalPrice` or `endValue` are missing, the code falls back to the stored `MarketPrice.price` or the last candle's close price to avoid NaNs and unexpected behavior.
+  - The endpoint accepts both Date strings and numeric timestamps for `startTime`/`endTime`.
+
+- **Example request:**
+
+```bash
+curl -X GET "http://localhost:5000/api/charts/klines?symbol=BTCUSDT&interval=15m&limit=100"
+```
+
+- **How to set a manipulation (admin/demo):** POST to `/api/prices/manipulate` with body like:
+
+```json
+{
+  "symbol": "BTCUSDT",
+  "startTime": "2025-11-27T18:00:00.000Z",
+  "endTime": "2025-11-27T18:10:00.000Z",
+  "endValue": 50000
+}
+```
+
+- **Troubleshooting:**
+  - If charts don't reflect manipulation, ensure the `MarketPrice` document for the symbol contains a `manipulation` object and `isActive: true`.
+  - Check server logs; the charts route now logs normalized symbols and manipulation progress to help debug timing/values.
+
+
 **Price Management (NEW)**
 - `GET /api/prices` — get current market prices for all symbols (no auth required)
   - Response (200):
@@ -324,6 +355,8 @@ This project is currently set to `MIT` in `package.json`. Add a `LICENSE` file t
 
 If you'd like, I can run the server now and capture runtime output or add tests for core endpoints.
 
-#   t r a d i n _ b a c k e n d  
- #   a p e x _ b a c k e n d  
+#   t r a d i n _ b a c k e n d 
+ 
+ #   a p e x _ b a c k e n d 
+ 
  
