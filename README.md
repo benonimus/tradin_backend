@@ -324,3 +324,5 @@ This project is currently set to `MIT` in `package.json`. Add a `LICENSE` file t
 
 If you'd like, I can run the server now and capture runtime output or add tests for core endpoints.
 
+#   t r a d i n _ b a c k e n d  
+ 
