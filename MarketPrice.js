@@ -9,6 +9,7 @@ const MarketPriceSchema = new mongoose.Schema({
     startTime: { type: Date },
     endTime: { type: Date },
     endValue: { type: Number },
+    durationMs: { type: Number }, // Duration of manipulation in milliseconds
     originalPrice: { type: Number }, // Price before manipulation started
     isActive: { type: Boolean, default: false },
   },

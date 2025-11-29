@@ -73,6 +73,7 @@ router.post('/manipulate', auth, async (req, res) => {
       startTime: start,
       endTime: end,
       endValue: parseFloat(endValue),
+      durationMs: end.getTime() - start.getTime(),
       originalPrice: doc.price,
       isActive: true,
     };
