@@ -12,7 +12,7 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, message: { me
 
 // Register
 router.post('/register', authLimiter, async (req, res) => {
-  const { username, email, password } = req.body;
+  const { username, email, password, isAdmin } = req.body;
   if (!username || !email || !password) {
     return res.status(400).json({ message: 'Please provide username, email and password' });
   }
@@ -23,14 +23,17 @@ router.post('/register', authLimiter, async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(password, salt);
 
-    user = new User({ username, email, password: hashed });
+    // Respect isAdmin if provided in the request body; otherwise let the schema default apply
+    const createObj = { username, email, password: hashed };
+    if (typeof isAdmin !== 'undefined') createObj.isAdmin = !!isAdmin;
+    user = new User(createObj);
     await user.save();
 
-    const payload = { userId: user.id };
+    const payload = { userId: user.id, isAdmin: user.isAdmin };
     const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
     const token = jwt.sign(payload, process.env.JWT_SECRET || 'devsecret', { expiresIn });
 
-    res.status(201).json({ token, user: { id: user.id, username: user.username, email: user.email } });
+    res.status(201).json({ token, user: { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin } });
   } catch (err) {
     res.status(500).json({ message: 'Server error' });
   }

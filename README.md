@@ -57,6 +57,9 @@ The server listens on the port defined in `PORT` (default `5000`).
 **Authentication**
 - `POST /api/auth/register` — register new user
   - Body (JSON): `{ "username": "alice", "email": "alice@example.com", "password": "secret", "isAdmin": false }`
+  - Notes:
+    - If the `isAdmin` field is provided in the registration body, the server will use that value when creating the user.
+    - If `isAdmin` is omitted, the `User` model default applies (currently `false`). Be careful granting admin rights during registration in production.
   - Response (201):
     ```json
     {
@@ -73,7 +76,7 @@ The server listens on the port defined in `PORT` (default `5000`).
     ```json
     {
       "token": "<jwt>",
-      "user": { "id": "<id>", "username": "alice", "email": "alice@example.com" }
+      "user": { "id": "<id>", "username": "alice", "email": "alice@example.com", "isAdmin": true }
     }
     ```
   - Errors: 400 (invalid input), 401 (invalid credentials), 404 (user not found)
@@ -247,6 +250,22 @@ The server listens on the port defined in `PORT` (default `5000`).
   - If you want the server to always use LCW, add `LIVECOINWATCH_API_KEY=1b0809f9-08d7-4326-9446-4e2e34150f9a` to your `.env`.
   - If you prefer not to expose your API key in `.env`, export it into your shell session before starting the server.
 
+  **Authorization / Admin**
+
+  - New `isAdmin` boolean on the `User` model indicates whether a user is authorized to perform administrative actions (default: `false`).
+  - Registration creates users with `isAdmin: false` by default. The registration and login responses include the `isAdmin` flag so clients can render UI appropriately.
+   - New `isAdmin` boolean on the `User` model indicates whether a user is authorized to perform administrative actions.
+   - NOTE: In the current dev setup registration creates users with `isAdmin: true` by default to allow immediate access to admin features. This is intentional for testing — change to `false` before deploying to production.
+   - The registration and login responses include the `isAdmin` flag so clients can render UI appropriately.
+  - The authentication middleware exposes the `isAdmin` flag from the JWT, and server routes use it to gate admin functionality.
+
+  UI behavior guidance:
+  - Unauthenticated or non-admin users: show the normal trading page and market data.
+  - Admin users (`isAdmin: true`): show manipulation controls (e.g., UI to POST to `/api/prices/manipulate`).
+
+  Security note:
+  - There is no public API to self-promote to admin. To create or promote an admin user, either set `isAdmin` in the database directly or implement a protected server-side flow. Ask if you want me to add an admin-only endpoint to manage user roles.
+
   ***
 
 **Real-time Price Updates (WebSocket)**
@@ -331,7 +350,17 @@ curl -X GET "http://localhost:5000/api/charts/klines?symbol=BTCUSDT&interval=15m
     }
     ```
 
+  - When called with a valid admin token, the endpoint also returns `canManipulate: true` in the response body. Clients should read this flag to decide whether to render price-manipulation controls in the UI. Example:
+
+    ```json
+    {
+      "prices": [...],
+      "canManipulate": true
+    }
+    ```
+
 - `POST /api/prices/manipulate` — set price manipulation for a symbol (admin/demo use)
+  - Auth: **required**, admin users only. The request must include a valid `Authorization: Bearer <token>` header where the token's payload includes `isAdmin: true`.
   - Body (JSON): `{ "symbol": "BTC", "startTime": "2024-01-15T10:35:00.000Z", "endTime": "2024-01-15T10:40:00.000Z", "endValue": 50000 }`
   - Response (200):
     ```json

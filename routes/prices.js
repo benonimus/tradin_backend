@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const MarketPrice = require('../MarketPrice');
+const jwt = require('jsonwebtoken');
+const auth = require('../middleware/auth');
 
 // GET /api/prices - list current market prices
 router.get('/', async (req, res) => {
@@ -19,7 +21,19 @@ router.get('/', async (req, res) => {
       return priceObject;
     });
 
-    res.json({ prices: sanitizedPrices });
+    // Determine whether caller (if authenticated) can manipulate prices
+    let canManipulate = false;
+    try {
+      const token = req.header('Authorization')?.replace('Bearer ', '');
+      if (token) {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'devsecret');
+        canManipulate = !!decoded.isAdmin;
+      }
+    } catch (e) {
+      // ignore invalid/missing tokens
+    }
+
+    res.json({ prices: sanitizedPrices, canManipulate });
   } catch (err) {
     console.error('GET /api/prices error', err);
     res.status(500).json({ error: 'Failed to fetch prices' });
@@ -27,7 +41,10 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/prices/manipulate - set price manipulation for a symbol
-router.post('/manipulate', async (req, res) => {
+router.post('/manipulate', auth, async (req, res) => {
+  // Only admin/authorized users may set manipulations
+  if (!req.isAdmin) return res.status(403).json({ error: 'Forbidden: not authorized to manipulate prices' });
+
   try {
     const { symbol, startTime, endTime, endValue } = req.body;
 

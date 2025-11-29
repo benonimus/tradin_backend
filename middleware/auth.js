@@ -9,6 +9,8 @@ const auth = (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     // Support multiple token payload shapes
     req.user = decoded.userId || decoded.id || (decoded.user && (decoded.user.id || decoded.user._id)) || decoded.user;
+    // expose admin flag to routes
+    req.isAdmin = !!decoded.isAdmin;
     next();
   } catch (err) {
     res.status(401).json({ message: 'Token is not valid' });
