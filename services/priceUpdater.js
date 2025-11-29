@@ -152,7 +152,9 @@ async function tick(options = {}) {
         newPrice = (await fetchRealPrice(symbol)) || doc.price;
       } else {
         // Before manipulation starts - normal behavior
-        newPrice = (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
+        // Use the latest real-time price from WebSocket, or fetch it if not available.
+        const realTimePrice = realTimePrices.get(symbol);
+        newPrice = realTimePrice !== undefined ? realTimePrice : await fetchRealPrice(symbol) || randomChange(doc.price, volatility);
       }
     } else {
       // No active manipulation - use the latest real-time price from WebSocket

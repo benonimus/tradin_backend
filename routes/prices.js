@@ -23,14 +23,11 @@ router.get('/', async (req, res) => {
 
     // Determine whether caller (if authenticated) can manipulate prices
     let canManipulate = false;
-    try {
-      const token = req.header('Authorization')?.replace('Bearer ', '');
-      if (token) {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'devsecret');
-        canManipulate = !!decoded.isAdmin;
-      }
-    } catch (e) {
-      // ignore invalid/missing tokens
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    if (token) {
+      jwt.verify(token, process.env.JWT_SECRET || 'devsecret', (err, decoded) => {
+        if (!err && decoded) canManipulate = !!decoded.isAdmin;
+      });
     }
 
     res.json({ prices: sanitizedPrices, canManipulate });

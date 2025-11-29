@@ -1,13 +1,13 @@
 # Crypto Trading Backend
 
-A comprehensive backend API for a crypto trading platform. Features user authentication, balance management, asset tracking, trading functionality, real-time market data, and advanced price manipulation capabilities. Built with Node.js, Express, and MongoDB (Mongoose).
+A comprehensive backend API for a crypto trading platform, built with Node.js, Express, and MongoDB. It features user authentication, real-time price data via WebSockets, balance and asset management, trading, and administrative price manipulation capabilities for simulations.
 
 **Highlights (new/updated features)**
 - JWT authentication with configurable expiration (`JWT_EXPIRES_IN`)
 - Rate limiting on auth endpoints to mitigate brute-force attacks
 - Deposit/withdraw endpoints with transaction records
 - Per-user assets with `averagePrice` tracking and portfolio summary
-- Buy/sell trades with fee calculation, gain/loss reporting
+- Buy/sell trades with fee calculation and gain/loss reporting
 - Market klines endpoint returning OHLCV data with ISO timestamps
 - **NEW:** Price manipulation system for simulating market movements
 - **NEW:** Real-time price updates with API integration
@@ -52,221 +52,204 @@ The server listens on the port defined in `PORT` (default `5000`).
 - `npm start` — run `node server.js`
 - `npm run dev` — run `nodemon server.js` (requires `nodemon`)
 
-**API Endpoints (detailed)**
+**API Endpoints**
 
-**Authentication**
-- `POST /api/auth/register` — register new user
-  - Body (JSON): `{ "username": "alice", "email": "alice@example.com", "password": "secret", "isAdmin": false }`
-  - Notes:
-    - If the `isAdmin` field is provided in the registration body, the server will use that value when creating the user.
-    - If `isAdmin` is omitted, the `User` model default applies (currently `false`). Be careful granting admin rights during registration in production.
-  - Response (201):
+---
+
+### Authentication
+
+#### `POST /api/auth/register`
+Registers a new user. The `isAdmin` flag cannot be set through this public endpoint and will default to `false`.
+-   **Auth:** None
+-   **Body:**
+    ```json
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "password": "secret"
+    }
+    ```
+-   **Success (201):**
     ```json
     {
       "token": "<jwt>",
       "user": { "id": "<id>", "username": "alice", "email": "alice@example.com", "isAdmin": false }
     }
     ```
-  - Errors: 400 (invalid input, email exists), 500 (server error)
-  - Note: `isAdmin` field is optional (defaults to false). Admin creation is restricted for security.
+-   **Errors:** 400 (invalid input, email exists), 500 (server error)
 
-- `POST /api/auth/login` — login
-  - Body (JSON): `{ "email": "alice@example.com", "password": "secret" }`
-  - Response (200):
+#### `POST /api/auth/login`
+Logs in a user and returns a JWT.
+-   **Auth:** None
+-   **Body:**
+    ```json
+    {
+      "email": "alice@example.com",
+      "password": "secret"
+    }
+    ```
+-   **Success (200):**
     ```json
     {
       "token": "<jwt>",
       "user": { "id": "<id>", "username": "alice", "email": "alice@example.com", "isAdmin": true }
     }
     ```
-  - Errors: 400 (invalid input), 401 (invalid credentials), 404 (user not found)
+-   **Errors:** 400 (invalid input), 401 (invalid credentials), 404 (user not found)
 
-- `GET /api/auth/me` — get current user (auth required)
-  - Header: `Authorization: Bearer <token>`
-  - Response (200):
+---
+
+### User
+
+#### `GET /api/auth/me`
+Retrieves the profile of the currently authenticated user.
+-   **Auth:** Required (User Token)
+-   **Success (200):**
     ```json
-    { "user": { "id": "<id>", "username": "alice", "email": "alice@example.com", "createdAt": "ISO8601" } }
+    {
+      "user": { "id": "<id>", "username": "alice", "email": "alice@example.com", "isAdmin": false, "createdAt": "ISO8601" }
+    }
+    ```
+-   **Errors:** 404 (user not found), 500 (server error)
+
+---
+
+### Balance & Transactions
+
+#### `GET /api/balance`
+Gets the authenticated user's current balance.
+-   **Auth:** Required (User Token)
+-   **Success (200):**
+    ```json
+    { "balance": 5000.50, "currency": "USD", "availableBalance": 5000.50, "lockedBalance": 0 }
     ```
 
-**Balance & Transactions**
-- `GET /api/balance` — get user balance (auth required)
-  - Response (200):
+#### `POST /api/balance/deposit`
+Deposits funds into the user's account.
+-   **Auth:** Required (User Token)
+-   **Body:** `{ "amount": 1000.0 }`
+-   **Success (201):**
     ```json
-    { "balance": 5000.5, "currency": "USD", "availableBalance": 5000.5, "lockedBalance": 0 }
+    { "success": true, "newBalance": 6000.50, "transactionId": "<id>", "timestamp": "ISO8601" }
     ```
+-   **Errors:** 400 (invalid amount), 500 (server error)
 
-- `POST /api/balance/deposit` — deposit funds
-  - Body: `{ "amount": 1000.0 }`
-  - Response (201):
+#### `POST /api/balance/withdraw`
+Withdraws funds from the user's account.
+-   **Auth:** Required (User Token)
+-   **Body:** `{ "amount": 500.0 }`
+-   **Success (201):**
     ```json
-    { "success": true, "newBalance": 6000.5, "transactionId": "<id>", "timestamp": "ISO8601" }
+    { "success": true, "newBalance": 5500.50, "transactionId": "<id>", "timestamp": "ISO8601" }
     ```
-  - Errors: 400 (invalid amount), 401 (unauthorized), 500 (server error)
+-   **Errors:** 400 (invalid amount), 422 (insufficient balance), 500 (server error)
 
-- `POST /api/balance/withdraw` — withdraw funds
-  - Body: `{ "amount": 500.0 }`
-  - Response (201):
-    ```json
-    { "success": true, "newBalance": 5500.5, "transactionId": "<id>", "timestamp": "ISO8601" }
-    ```
-  - Errors: 400 (invalid amount), 422 (insufficient balance), 401, 500
+---
 
-**Assets / Trading**
-- `GET /api/trade` — list user's assets + portfolio summary (auth required)
-  - Response (200):
+### Trading
+
+#### `GET /api/trade`
+Lists the user's assets and a portfolio summary.
+-   **Auth:** Required (User Token)
+-   **Success (200):**
     ```json
     {
       "assets": [
         { "symbol":"BTC","quantity":0.5,"averagePrice":45000,"currentPrice":45000,"totalValue":22500,"unrealizedGain":0 }
       ],
-      "portfolioValue":22500,
-      "totalInvested":22500,
-      "totalGain":0
+      "portfolioValue": 22500,
+      "totalInvested": 22500,
+      "totalGain": 0
     }
     ```
 
-- `POST /api/trade/buy` — buy crypto
-  - Body: `{ "crypto": "BTC", "amount": 0.1, "price": 47000 }`
-  - Response (201):
+#### `POST /api/trade/buy`
+Executes a buy order for a cryptocurrency.
+-   **Auth:** Required (User Token)
+-   **Body:** `{ "crypto": "BTC", "amount": 0.1, "price": 47000 }`
+-   **Success (201):**
     ```json
     {
-      "success": true,
-      "tradeId": "<id>",
-      "symbol": "BTC",
-      "quantity": 0.1,
-      "price": 47000,
-      "totalCost": 4700,
-      "fee": 47,
-      "timestamp": "ISO8601",
-      "newBalance": 5300.5
+      "success": true, "tradeId": "<id>", "symbol": "BTC", "quantity": 0.1, "price": 47000,
+      "totalCost": 4700, "fee": 47, "timestamp": "ISO8601", "newBalance": 5300.50
     }
     ```
-  - Errors: 400 (invalid input), 422 (insufficient funds), 401, 500
+-   **Errors:** 400 (invalid input), 422 (insufficient funds), 500 (server error)
 
-- `POST /api/trade/sell` — sell crypto
-  - Body: `{ "crypto": "BTC", "amount": 0.05, "price": 47500 }`
-  - Response (201):
+#### `POST /api/trade/sell`
+Executes a sell order for a cryptocurrency.
+-   **Auth:** Required (User Token)
+-   **Body:** `{ "crypto": "BTC", "amount": 0.05, "price": 47500 }`
+-   **Success (201):**
     ```json
     {
-      "success": true,
-      "tradeId": "<id>",
-      "symbol": "BTC",
-      "quantity": 0.05,
-      "price": 47500,
-      "totalProceeds": 2375,
-      "fee": 23.75,
-      "netProceeds": 2351.25,
-      "timestamp": "ISO8601",
-      "newBalance": 5651.5,
-      "gainLoss": 50
+      "success": true, "tradeId": "<id>", "symbol": "BTC", "quantity": 0.05, "price": 47500,
+      "totalProceeds": 2375, "fee": 23.75, "netProceeds": 2351.25, "timestamp": "ISO8601",
+      "newBalance": 5651.75, "gainLoss": 50
     }
     ```
-  - Errors: 400 (invalid input), 422 (insufficient holdings), 401, 500
+-   **Errors:** 400 (invalid input), 422 (insufficient holdings), 500 (server error)
 
-**Market Data / Charts**
-- `GET /api/charts/klines` — fetch candlestick (OHLCV) data from Binance (no auth required)
-  - Query parameters:
-    - `symbol` (required, e.g. `BTCUSDT`)
+---
+
+### Market Data
+
+#### `GET /api/prices`
+Gets current market prices for all symbols. If called by an admin, it includes a `canManipulate` flag.
+-   **Auth:** None
+-   **Success (200):**
+    ```json
+    {
+      "prices": [
+        { "symbol": "BTCUSDT", "price": 45000.50, "updatedAt": "...", "manipulation": { "isActive": false } }
+      ],
+      "canManipulate": false
+    }
+    ```
+
+#### `GET /api/charts/klines`
+Fetches candlestick (OHLCV) data.
+-   **Auth:** None
+-   **Query Params:**
+    - `symbol` (required, e.g., `BTCUSDT`)
     - `interval` (required: `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`)
     - `limit` (optional, default 100)
-  - Response (200):
+-   **Success (200):**
     ```json
     {
-      "symbol":"BTCUSDT",
-      "interval":"1h",
+      "symbol":"BTCUSDT", "interval":"1h",
       "data":[
-        { "time":1703001600, "timestamp":"2024-02-18T00:00:00.000Z", "open":46800, "high":47200, "low":46700, "close":47100, "volume":2500 },
-        ...
+        { "time":1703001600, "timestamp":"2024-02-18T00:00:00.000Z", "open":46800, "high":47200, "low":46700, "close":47100, "volume":2500 }
       ]
     }
     ```
 
-  **LiveCoinWatch Integration**
+---
 
-  This project can query LiveCoinWatch (LCW) for historical and current price data. Set the `LIVECOINWATCH_API_KEY` environment variable to enable LCW as the preferred provider for the charts endpoint. If LCW is not configured or the request fails, the server falls back to Binance and CoinGecko as before.
+### Price Manipulation (Admin Only)
 
-  - Recommended: put your API key into the `.env` file as `LIVECOINWATCH_API_KEY`.
-  - Example key (for testing only; do not commit secrets to source control): `1b0809f9-08d7-4326-9446-4e2e34150f9a`
+#### `POST /api/prices/manipulate`
+Sets a price manipulation for a symbol.
+-   **Auth:** Required (Admin Token)
+-   **Body:**
+    ```json
+    {
+      "symbol": "BTCUSDT",
+      "startTime": "2025-11-27T18:00:00.000Z",
+      "endTime": "2025-11-27T18:10:00.000Z",
+      "endValue": 50000
+    }
+    ```
+-   **Success (200):**
+    ```json
+    {
+      "message": "Price manipulation set successfully",
+      "manipulation": { "startTime": "...", "endTime": "...", "endValue": 50000, "originalPrice": 45000.50, "isActive": true }
+    }
+    ```
+-   **Errors:** 400 (invalid input), 403 (forbidden), 404 (symbol not found), 500 (server error)
 
-  LiveCoinWatch endpoints used (examples):
-
-  - 1m candles for the last hour (history endpoint)
-
-  PowerShell (compute epoch seconds and post to LCW history API):
-
-  ```powershell
-  #$end = current time in seconds
-  #$start = 1 hour ago (3600 seconds)
-  $end = [int](Get-Date -UFormat %s)
-  $start = $end - 3600
-  $body = @{ currency = 'USD'; code = 'BTC'; start = $start; end = $end; step = 60 } | ConvertTo-Json
-  Invoke-RestMethod -Uri 'https://api.livecoinwatch.com/coins/single/history' -Method Post -Headers @{ 'x-api-key' = '1b0809f9-08d7-4326-9446-4e2e34150f9a'; 'Content-Type' = 'application/json' } -Body $body
-  ```
-
-  curl (bash/sh):
-
-  ```bash
-  # get epoch seconds for now and start (now-3600) using date (example)
-  end=$(date +%s)
-  start=$((end - 3600))
-  curl -X POST 'https://api.livecoinwatch.com/coins/single/history' \
-    -H 'x-api-key: 1b0809f9-08d7-4326-9446-4e2e34150f9a' \
-    -H 'Content-Type: application/json' \
-    -d "{ \"currency\": \"USD\", \"code\": \"BTC\", \"start\": $start, \"end\": $end, \"step\": 60 }"
-  ```
-
-  - Current BTC → USD (single/current price)
-
-  PowerShell:
-  ```powershell
-  $body = @{ currency = 'USD'; code = 'BTC' } | ConvertTo-Json
-  Invoke-RestMethod -Uri 'https://api.livecoinwatch.com/coins/single' -Method Post -Headers @{ 'x-api-key' = '1b0809f9-08d7-4326-9446-4e2e34150f9a'; 'Content-Type' = 'application/json' } -Body $body
-  ```
-
-  curl (bash/sh):
-  ```bash
-  curl -X POST 'https://api.livecoinwatch.com/coins/single' \
-    -H 'x-api-key: 1b0809f9-08d7-4326-9446-4e2e34150f9a' \
-    -H 'Content-Type: application/json' \
-    -d '{"currency":"USD","code":"BTC"}'
-  ```
-
-  Local API usage (the server will prefer LCW if `LIVECOINWATCH_API_KEY` is set):
-
-  - Get last hour of 1m candles (60 candles) from the local charts endpoint:
-
-  ```powershell
-  Invoke-RestMethod 'http://localhost:5000/api/charts/klines?symbol=BTCUSDT&interval=1m&limit=60'
-  ```
-
-  - Get the current stored BTC price from the local `/api/prices` endpoint and filter for `BTCUSDT`:
-
-  ```powershell
-  (Invoke-RestMethod 'http://localhost:5000/api/prices').prices | Where-Object { $_.symbol -eq 'BTCUSDT' }
-  ```
-
-  Notes:
-  - LCW responses can be arrays of arrays ([[ts,o,h,l,c,v],...]) or arrays of objects; the server normalizes both shapes to the OHLCV format returned by `/api/charts/klines`.
-  - If you want the server to always use LCW, add `LIVECOINWATCH_API_KEY=1b0809f9-08d7-4326-9446-4e2e34150f9a` to your `.env`.
-  - If you prefer not to expose your API key in `.env`, export it into your shell session before starting the server.
-
-  **Authorization / Admin**
-
-  - New `isAdmin` boolean on the `User` model indicates whether a user is authorized to perform administrative actions (default: `false`).
-  - Registration creates users with `isAdmin: false` by default. The registration and login responses include the `isAdmin` flag so clients can render UI appropriately.
-   - New `isAdmin` boolean on the `User` model indicates whether a user is authorized to perform administrative actions.
-   - NOTE: In the current dev setup registration creates users with `isAdmin: true` by default to allow immediate access to admin features. This is intentional for testing — change to `false` before deploying to production.
-   - The registration and login responses include the `isAdmin` flag so clients can render UI appropriately.
-  - The authentication middleware exposes the `isAdmin` flag from the JWT, and server routes use it to gate admin functionality.
-
-  UI behavior guidance:
-  - Unauthenticated or non-admin users: show the normal trading page and market data.
-  - Admin users (`isAdmin: true`): show manipulation controls (e.g., UI to POST to `/api/prices/manipulate`).
-
-  Security note:
-  - There is no public API to self-promote to admin. To create or promote an admin user, either set `isAdmin` in the database directly or implement a protected server-side flow. Ask if you want me to add an admin-only endpoint to manage user roles.
-
-  ***
+---
 
 **Real-time Price Updates (WebSocket)**
 

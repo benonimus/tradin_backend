@@ -23,10 +23,9 @@ router.post('/register', authLimiter, async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(password, salt);
 
-    // Respect isAdmin if provided in the request body; otherwise let the schema default apply
-    const createObj = { username, email, password: hashed };
-    if (typeof isAdmin !== 'undefined') createObj.isAdmin = !!isAdmin;
-    user = new User(createObj);
+    // Do not allow setting isAdmin directly from public registration.
+    // This is a security risk. It should be handled in a separate, admin-only endpoint.
+    user = new User({ username, email, password: hashed });
     await user.save();
 
     const payload = { userId: user.id, isAdmin: user.isAdmin };
