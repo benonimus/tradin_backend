@@ -1,6 +1,6 @@
 const MarketPrice = require('../MarketPrice');
 const axios = require('axios');
-const WebSocket = require('ws');
+const ccxt = require('ccxt');
 
 let intervalHandle = null;
 const wsConnections = new Map();
@@ -16,6 +16,9 @@ const DEFAULT_SYMBOLS = [
 // LiveCoinWatch configuration (default to provided key if env not set)
 const LCW_API_KEY = process.env.LIVECOINWATCH_API_KEY || '1b0809f9-08d7-4326-9446-4e2e34150f9a';
 const LCW_SINGLE_URL = 'https://api.livecoinwatch.com/coins/single';
+const binance = new ccxt.binance({
+  enableRateLimit: true, // Recommended for production use
+});
 
 function deriveBaseCode(sym) {
   if (!sym) return sym;
@@ -56,13 +59,11 @@ async function fetchRealPrice(symbol) {
 
   // Binance fallback
   try {
-    const response = await axios.get('https://api.binance.com/api/v3/ticker/price', {
-      params: { symbol },
-      timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
-    });
-    return parseFloat(response.data.price);
+    // Use ccxt to fetch the ticker for the symbol
+    const ticker = await binance.fetchTicker(symbol);
+    return ticker.last;
   } catch (error) {
-    console.error(`Error fetching price for ${symbol} from Binance:`, error.message);
+    console.error(`Error fetching price for ${symbol} from Binance via ccxt:`, error.message);
     return null;
   }
 }
@@ -152,15 +153,12 @@ async function tick(options = {}) {
         newPrice = (await fetchRealPrice(symbol)) || doc.price;
       } else {
         // Before manipulation starts - normal behavior
-        // Use the latest real-time price from WebSocket, or fetch it if not available.
-        const realTimePrice = realTimePrices.get(symbol);
-        newPrice = realTimePrice !== undefined ? realTimePrice : await fetchRealPrice(symbol) || randomChange(doc.price, volatility);
+        newPrice = realTimePrices.get(symbol) || (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
       }
     } else {
       // No active manipulation - use the latest real-time price from WebSocket
       // Fallback to random change if WebSocket price is not available yet
-      const realTimePrice = realTimePrices.get(symbol);
-      newPrice = realTimePrice !== undefined ? realTimePrice : randomChange(doc.price, volatility);
+      newPrice = realTimePrices.get(symbol) || randomChange(doc.price, volatility);
     }
 
     doc.price = Number(newPrice.toFixed(8));
@@ -181,31 +179,32 @@ async function tick(options = {}) {
   }
 }
 
-function connectToBinance(symbol, wss) {
-  const wsUrl = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@trade`;
-  const ws = new WebSocket(wsUrl);
+async function connectToBinance(symbol) {
+  // ccxt unified WebSocket streaming is still in development for many exchanges.
+  // We will use the watchTrades method which is a conventional way with ccxt.
+  if (wsConnections.has(symbol)) {
+    return;
+  }
+  console.log(`Connecting to Binance WebSocket for ${symbol} via ccxt`);
+  wsConnections.set(symbol, true); // Mark as connecting/connected
 
-  ws.on('open', () => {
-    console.log(`Connected to Binance WebSocket for ${symbol}`);
-  });
-
-  ws.on('message', (data) => {
-    const trade = JSON.parse(data);
-    const price = parseFloat(trade.p);
-    realTimePrices.set(symbol, price);
-  });
-
-  ws.on('error', (error) => {
-    console.error(`WebSocket error for ${symbol}:`, error);
-  });
-
-  ws.on('close', () => {
-    console.log(`WebSocket disconnected for ${symbol}. Reconnecting in 3 seconds...`);
-    wsConnections.delete(symbol);
-    setTimeout(() => connectToBinance(symbol, wss), 3000);
-  });
-
-  wsConnections.set(symbol, ws);
+  while (wsConnections.has(symbol)) {
+    try {
+      await binance.watchTrades(symbol, undefined, undefined, (trades) => {
+        for (const trade of trades) {
+          // Use the original symbol as the key, as ccxt might return a unified symbol (e.g., 'BTC/USDT')
+          // which could differ from the one used elsewhere in the app ('BTCUSDT').
+          // The last trade in the list is the most recent one.
+          realTimePrices.set(symbol, trade.price);
+        }
+      });
+    } catch (error) {
+      console.error(`ccxt WebSocket error for ${symbol}:`, error.message);
+      console.log(`WebSocket for ${symbol} disconnected. Reconnecting in 5 seconds...`);
+      await new Promise((resolve) => setTimeout(resolve, 5000)); // wait 5s before reconnecting
+    }
+  }
+  console.log(`Stopped watching trades for ${symbol}`);
 }
 
 function start(options = {}) {
@@ -220,7 +219,7 @@ function start(options = {}) {
   // Connect to Binance for each symbol
   symbols.forEach((symbol) => {
     if (!wsConnections.has(symbol)) {
-      connectToBinance(symbol, wss);
+      connectToBinance(symbol).catch(err => console.error(`Failed to connect to ${symbol} WS:`, err));
     }
   });
 
@@ -234,10 +233,15 @@ function start(options = {}) {
 }
 
 function stop() {
-  if (intervalHandle) clearInterval(intervalHandle);
-  wsConnections.forEach((ws) => ws.close());
+  console.log('Stopping price updater...');
+  if (intervalHandle) {
+    clearInterval(intervalHandle);
+    intervalHandle = null;
+  }
+  // This clears our loop condition in connectToBinance
   wsConnections.clear();
-  intervalHandle = null;
+  // This closes all underlying WS connections handled by the ccxt instance
+  binance.close();
   console.log('Price updater stopped');
 }
 

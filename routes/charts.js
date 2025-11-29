@@ -1,11 +1,15 @@
 const express = require('express');
 const axios = require('axios');
+const ccxt = require('ccxt');
 const MarketPrice = require('../MarketPrice');
 const router = express.Router();
 
 // LiveCoinWatch default key (falls back to provided key if env not set)
 const LCW_API_KEY = process.env.LIVECOINWATCH_API_KEY || '1b0809f9-08d7-4326-9446-4e2e34150f9a';
 const LCW_HISTORY_URL = 'https://api.livecoinwatch.com/coins/single/history';
+const binance = new ccxt.binance({
+  enableRateLimit: true,
+});
 
 // Fetch klines (candlestick) data from Binance
 router.get('/klines', async (req, res) => {
@@ -81,20 +85,16 @@ router.get('/klines', async (req, res) => {
 
     // If LCW didn't provide data, fall back to Binance
     if (!data) {
-      // Construct the Binance API URL
-      const binanceUrl = 'https://api.binance.com/api/v3/klines';
-
-      // Fetch data from Binance (use normalized symbol)
-      const response = await axios.get(binanceUrl, {
-        params: {
-          symbol: normalizedSymbol,
-          interval: interval,
-          limit: limit || 100,
-        },
-      });
-
-      data = response.data;
-      console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
+      console.log(`[CHARTS] Falling back to Binance via ccxt for ${normalizedSymbol}`);
+      // Fetch OHLCV data from Binance using ccxt
+      // ccxt returns data in the format: [timestamp, open, high, low, close, volume]
+      // which is the same as the old Binance API response, so no further mapping is needed.
+      const limitNum = limit ? parseInt(limit, 10) : undefined; // ccxt uses default if undefined
+      const ohlcv = await binance.fetchOHLCV(normalizedSymbol, interval, undefined, limitNum);
+      if (ohlcv && ohlcv.length > 0) {
+        data = ohlcv;
+        console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
+      }
     }
 
     // Check if there's an active price manipulation for this symbol
@@ -109,7 +109,6 @@ router.get('/klines', async (req, res) => {
 
       if (manip.isActive && startTime && endTime && now >= startTime && now <= endTime) {
         console.log('[CHARTS] Active manipulation found for symbol:', normalizedSymbol);
-        console.log('[CHARTS] Manipulation is currently active. Scaling entire chart...');
 
         if (data && data.length > 0) {
           const totalDuration = endTime - startTime;
@@ -131,12 +130,8 @@ router.get('/klines', async (req, res) => {
           const priceDifference = targetPrice - startPrice;
           const currentManipulatedPrice = startPrice + (priceDifference * progress);
 
-          console.log(`[CHARTS] Current manipulation progress: ${Math.round(progress * 100)}%`);
-          console.log(`[CHARTS] Current ideal manipulated price: ${currentManipulatedPrice}`);
-
           // Calculate scale ratio based on last close
           const ratio = originalLastClose > 0 ? currentManipulatedPrice / originalLastClose : 1;
-          console.log(`[CHARTS] Scaling ratio to apply to chart: ${ratio}`);
 
           manipulatedData = data.map((candle) => {
             // Safely parse numeric OHLC values and apply ratio
@@ -155,16 +150,16 @@ router.get('/klines', async (req, res) => {
             ];
           });
 
-          console.log(`[CHARTS] Finished scaling all ${data.length} candles based on active manipulation.`);
+          console.log(`[CHARTS] Scaled ${data.length} candles for ${normalizedSymbol} based on active manipulation.`);
         }
-      } else {
-        console.log('[CHARTS] No active manipulation window currently for symbol:', normalizedSymbol);
       }
-    } else {
-      console.log('[CHARTS] No manipulation configuration found for symbol:', normalizedSymbol);
     }
 
-    // Format the data for lightweight-charts and include ISO timestamp
+    if (!manipulatedData || manipulatedData.length === 0) {
+      return res.json({ symbol, interval, data: [] });
+    }
+
+    // Format the data for the frontend
     const formattedData = manipulatedData.map((d) => ({
       time: Math.floor(d[0] / 1000), // seconds
       timestamp: new Date(d[0]).toISOString(),
