@@ -3,6 +3,10 @@ const axios = require('axios');
 const MarketPrice = require('../MarketPrice');
 const router = express.Router();
 
+// LiveCoinWatch default key (falls back to provided key if env not set)
+const LCW_API_KEY = process.env.LIVECOINWATCH_API_KEY || '1b0809f9-08d7-4326-9446-4e2e34150f9a';
+const LCW_HISTORY_URL = 'https://api.livecoinwatch.com/coins/single/history';
+
 // Fetch klines (candlestick) data from Binance
 router.get('/klines', async (req, res) => {
   const { symbol, interval, limit } = req.query;
@@ -22,20 +26,76 @@ router.get('/klines', async (req, res) => {
   }
 
   try {
-    // Construct the Binance API URL
-    const binanceUrl = 'https://api.binance.com/api/v3/klines';
+    // Try LiveCoinWatch history endpoint when key is present and interval supported
+    let data = null;
+    const intervalToSeconds = {
+      '1m': 60,
+      '5m': 300,
+      '15m': 900,
+      '1h': 3600,
+      '4h': 14400,
+      '1d': 86400,
+    };
 
-    // Fetch data from Binance (use normalized symbol)
-    const response = await axios.get(binanceUrl, {
-      params: {
-        symbol: normalizedSymbol,
-        interval: interval,
-        limit: limit || 100,
-      },
-    });
+    if (LCW_API_KEY && Object.prototype.hasOwnProperty.call(intervalToSeconds, interval)) {
+      try {
+        const step = intervalToSeconds[interval];
+        const end = Math.floor(Date.now() / 1000);
+        const start = end - (Number(limit || 100) * step);
+        const code = (normalizedSymbol || '').replace(/USDT$|USD$/i, '');
 
-    const data = response.data;
-    console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
+        const body = { currency: 'USD', code, start, end, step };
+        let lcwResp = null;
+        try {
+          lcwResp = await axios.post(LCW_HISTORY_URL, body, {
+            headers: { 'x-api-key': LCW_API_KEY, 'Content-Type': 'application/json' },
+            timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
+          });
+        } catch (err) {
+          console.error('[CHARTS] LiveCoinWatch history request failed:', err?.message || err);
+          lcwResp = null;
+        }
+
+        if (lcwResp && lcwResp.data) {
+          let payload = lcwResp.data;
+          if (payload.data) payload = payload.data;
+
+          // payload may be array-of-arrays [[ts, o, h, l, c, v], ...] or array-of-objects
+          if (Array.isArray(payload) && payload.length > 0) {
+            if (Array.isArray(payload[0])) {
+              data = payload.map((c) => [Number(c[0]) < 1e12 ? Number(c[0]) * 1000 : Number(c[0]), c[1].toString(), c[2].toString(), c[3].toString(), c[4].toString(), (c[5] || '0').toString()]);
+            } else if (typeof payload[0] === 'object') {
+              data = payload.map((o) => {
+                const tsRaw = o.time || o.t || o.timestamp || o[0];
+                let ts = Number(tsRaw || 0);
+                if (ts && ts < 1e12) ts = ts * 1000;
+                return [ts, (o.open || o.o || o.O || 0).toString(), (o.high || o.h || o.H || 0).toString(), (o.low || o.l || o.L || 0).toString(), (o.close || o.c || o.C || 0).toString(), (o.volume || o.v || 0).toString()];
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[CHARTS] LiveCoinWatch processing error:', err?.message || err);
+      }
+    }
+
+    // If LCW didn't provide data, fall back to Binance
+    if (!data) {
+      // Construct the Binance API URL
+      const binanceUrl = 'https://api.binance.com/api/v3/klines';
+
+      // Fetch data from Binance (use normalized symbol)
+      const response = await axios.get(binanceUrl, {
+        params: {
+          symbol: normalizedSymbol,
+          interval: interval,
+          limit: limit || 100,
+        },
+      });
+
+      data = response.data;
+      console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
+    }
 
     // Check if there's an active price manipulation for this symbol
     const marketPrice = await MarketPrice.findOne({ symbol: normalizedSymbol });

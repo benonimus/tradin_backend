@@ -10,15 +10,56 @@ const DEFAULT_SYMBOLS = [
   { symbol: 'LTCUSDT', price: 100 },
 ];
 
-// Fetch real price from Binance API
+// LiveCoinWatch configuration (default to provided key if env not set)
+const LCW_API_KEY = process.env.LIVECOINWATCH_API_KEY || '1b0809f9-08d7-4326-9446-4e2e34150f9a';
+const LCW_SINGLE_URL = 'https://api.livecoinwatch.com/coins/single';
+
+function deriveBaseCode(sym) {
+  if (!sym) return sym;
+  const s = (sym || '').replace('/', '').toUpperCase();
+  if (s.endsWith('USDT')) return s.replace(/USDT$/i, '');
+  if (s.endsWith('USD')) return s.replace(/USD$/i, '');
+  return s;
+}
+
+// Fetch real price from LiveCoinWatch (preferred) or Binance as fallback
 async function fetchRealPrice(symbol) {
+  if (LCW_API_KEY) {
+    try {
+      const code = deriveBaseCode(symbol);
+      const body = { currency: 'USD', code };
+      const resp = await axios.post(LCW_SINGLE_URL, body, {
+        headers: { 'x-api-key': LCW_API_KEY, 'Content-Type': 'application/json' },
+        timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
+      });
+
+      let payload = resp && resp.data ? resp.data : null;
+      if (payload && payload.data) payload = payload.data;
+
+      let price = null;
+      if (payload) {
+        price = payload.rate || payload.price || payload.rateUsd || payload.value || null;
+        if (!price && payload.price && typeof payload.price === 'object') {
+          price = payload.price.rate || payload.price.value || null;
+        }
+      }
+
+      return price !== null && price !== undefined ? Number(price) : null;
+    } catch (err) {
+      console.error(`LCW fetch error for ${symbol}:`, err?.message || err);
+      // fall through to Binance fallback
+    }
+  }
+
+  // Binance fallback
   try {
     const response = await axios.get('https://api.binance.com/api/v3/ticker/price', {
       params: { symbol },
+      timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
     });
     return parseFloat(response.data.price);
   } catch (error) {
-    console.error(`Error fetching price for ${symbol}:`, error.message);
+    console.error(`Error fetching price for ${symbol} from Binance:`, error.message);
     return null;
   }
 }

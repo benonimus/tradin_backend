@@ -178,6 +178,77 @@ The server listens on the port defined in `PORT` (default `5000`).
     }
     ```
 
+  **LiveCoinWatch Integration**
+
+  This project can query LiveCoinWatch (LCW) for historical and current price data. Set the `LIVECOINWATCH_API_KEY` environment variable to enable LCW as the preferred provider for the charts endpoint. If LCW is not configured or the request fails, the server falls back to Binance and CoinGecko as before.
+
+  - Recommended: put your API key into the `.env` file as `LIVECOINWATCH_API_KEY`.
+  - Example key (for testing only; do not commit secrets to source control): `1b0809f9-08d7-4326-9446-4e2e34150f9a`
+
+  LiveCoinWatch endpoints used (examples):
+
+  - 1m candles for the last hour (history endpoint)
+
+  PowerShell (compute epoch seconds and post to LCW history API):
+
+  ```powershell
+  #$end = current time in seconds
+  #$start = 1 hour ago (3600 seconds)
+  $end = [int](Get-Date -UFormat %s)
+  $start = $end - 3600
+  $body = @{ currency = 'USD'; code = 'BTC'; start = $start; end = $end; step = 60 } | ConvertTo-Json
+  Invoke-RestMethod -Uri 'https://api.livecoinwatch.com/coins/single/history' -Method Post -Headers @{ 'x-api-key' = '1b0809f9-08d7-4326-9446-4e2e34150f9a'; 'Content-Type' = 'application/json' } -Body $body
+  ```
+
+  curl (bash/sh):
+
+  ```bash
+  # get epoch seconds for now and start (now-3600) using date (example)
+  end=$(date +%s)
+  start=$((end - 3600))
+  curl -X POST 'https://api.livecoinwatch.com/coins/single/history' \
+    -H 'x-api-key: 1b0809f9-08d7-4326-9446-4e2e34150f9a' \
+    -H 'Content-Type: application/json' \
+    -d "{ \"currency\": \"USD\", \"code\": \"BTC\", \"start\": $start, \"end\": $end, \"step\": 60 }"
+  ```
+
+  - Current BTC → USD (single/current price)
+
+  PowerShell:
+  ```powershell
+  $body = @{ currency = 'USD'; code = 'BTC' } | ConvertTo-Json
+  Invoke-RestMethod -Uri 'https://api.livecoinwatch.com/coins/single' -Method Post -Headers @{ 'x-api-key' = '1b0809f9-08d7-4326-9446-4e2e34150f9a'; 'Content-Type' = 'application/json' } -Body $body
+  ```
+
+  curl (bash/sh):
+  ```bash
+  curl -X POST 'https://api.livecoinwatch.com/coins/single' \
+    -H 'x-api-key: 1b0809f9-08d7-4326-9446-4e2e34150f9a' \
+    -H 'Content-Type: application/json' \
+    -d '{"currency":"USD","code":"BTC"}'
+  ```
+
+  Local API usage (the server will prefer LCW if `LIVECOINWATCH_API_KEY` is set):
+
+  - Get last hour of 1m candles (60 candles) from the local charts endpoint:
+
+  ```powershell
+  Invoke-RestMethod 'http://localhost:5000/api/charts/klines?symbol=BTCUSDT&interval=1m&limit=60'
+  ```
+
+  - Get the current stored BTC price from the local `/api/prices` endpoint and filter for `BTCUSDT`:
+
+  ```powershell
+  (Invoke-RestMethod 'http://localhost:5000/api/prices').prices | Where-Object { $_.symbol -eq 'BTCUSDT' }
+  ```
+
+  Notes:
+  - LCW responses can be arrays of arrays ([[ts,o,h,l,c,v],...]) or arrays of objects; the server normalizes both shapes to the OHLCV format returned by `/api/charts/klines`.
+  - If you want the server to always use LCW, add `LIVECOINWATCH_API_KEY=1b0809f9-08d7-4326-9446-4e2e34150f9a` to your `.env`.
+  - If you prefer not to expose your API key in `.env`, export it into your shell session before starting the server.
+
+  ***
+
 **Real-time Price Updates (WebSocket)**
 
 To receive real-time price updates, connect to the WebSocket server.
