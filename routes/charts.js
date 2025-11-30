@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const ccxt = require('ccxt');
 const MarketPrice = require('../MarketPrice');
 const router = express.Router();
 
