@@ -1,15 +1,7 @@
 const express = require('express');
 const axios = require('axios');
-const ccxt = require('ccxt');
 const MarketPrice = require('../MarketPrice');
 const router = express.Router();
-
-// LiveCoinWatch default key (falls back to provided key if env not set)
-const LCW_API_KEY = process.env.LIVECOINWATCH_API_KEY || '1b0809f9-08d7-4326-9446-4e2e34150f9a';
-const LCW_HISTORY_URL = 'https://api.livecoinwatch.com/coins/single/history';
-const binance = new ccxt.binance({
-  enableRateLimit: true,
-});
 
 // Fetch klines (candlestick) data from Binance
 router.get('/klines', async (req, res) => {
