@@ -211,8 +211,6 @@ function stop() {
   }
   // This clears our loop condition in connectToBinance
   wsConnections.clear();
-  // This closes all underlying WS connections handled by the ccxt instance
-  binance.close();
   console.log('Price updater stopped');
 }
 

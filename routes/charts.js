@@ -81,15 +81,25 @@ router.get('/klines', async (req, res) => {
 
     // If LCW didn't provide data, fall back to Binance
     if (!data) {
-      console.log(`[CHARTS] Falling back to Binance via ccxt for ${normalizedSymbol}`);
-      // Fetch OHLCV data from Binance using ccxt
-      // ccxt returns data in the format: [timestamp, open, high, low, close, volume]
-      // which is the same as the old Binance API response, so no further mapping is needed.
-      const limitNum = limit ? parseInt(limit, 10) : undefined; // ccxt uses default if undefined
-      const ohlcv = await binance.fetchOHLCV(normalizedSymbol, interval, undefined, limitNum);
-      if (ohlcv && ohlcv.length > 0) {
-        data = ohlcv;
-        console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
+      console.log(`[CHARTS] Falling back to Binance API for ${normalizedSymbol}`);
+      // Fetch OHLCV data from Binance using direct API call
+      // Binance klines API returns data in the format: [timestamp, open, high, low, close, volume, ...]
+      try {
+        const limitNum = limit ? parseInt(limit, 10) : 100;
+        const response = await axios.get(`https://api.binance.com/api/v3/klines`, {
+          params: {
+            symbol: normalizedSymbol,
+            interval: interval,
+            limit: limitNum,
+          },
+          timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
+        });
+        if (response.data && response.data.length > 0) {
+          data = response.data;
+          console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
+        }
+      } catch (err) {
+        console.error('[CHARTS] Binance API request failed:', err?.message || err);
       }
     }
 
