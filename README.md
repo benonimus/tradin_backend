@@ -8,8 +8,7 @@ A unique feature of this platform is the ability for an administrator to simulat
 
 - **User Authentication**: Secure user registration and login using JWT (JSON Web Tokens).
 - **Real-time Price Updates**: Broadcasts live cryptocurrency prices to connected clients using WebSockets.
-- **Multi-Source Price Feeds**: Utilizes LiveCoinWatch as the primary data source, with a robust fallback to Binance via the `ccxt` library.
-- **Price Feeds**: Utilizes the official Binance API for both real-time and historical price data.
+- **Price Feeds**: Utilizes the official Binance API for both real-time and historical cryptocurrency price data.
 - **Cryptocurrency Trading**: API endpoints for buying and selling assets.
 - **Portfolio & Balance Management**: Tracks user-owned assets, average buy price, and available USD balance.
 - **Transaction History**: Logs all deposits, withdrawals, and trades.
@@ -21,7 +20,7 @@ A unique feature of this platform is the ability for an administrator to simulat
 - **Backend**: Node.js, Express.js
 - **Database**: MongoDB with Mongoose ODM
 - **Real-time Communication**: WebSocket (`ws` library)
-- **Authentication**: JWT (`jsonwebtoken`), `bcryptjs` for hashing.
+- **Authentication**: JWT (`jsonwebtoken`), `bcryptjs` for password hashing.
 - **HTTP Requests**: `axios` for interacting with the Binance REST API.
 - **Environment Management**: `dotenv`
 
@@ -49,7 +48,7 @@ A unique feature of this platform is the ability for an administrator to simulat
 
 3.  **Create a `.env` file** in the root of the project by copying the example below. This file will store your environment variables.
 
-    ```env
+    ```dotenv
     # Server Configuration
     PORT=5000
     FRONTEND_ORIGIN=http://localhost:8080
@@ -62,9 +61,7 @@ A unique feature of this platform is the ability for an administrator to simulat
     JWT_EXPIRES_IN=7d
 
     # Price Service Configuration
-    PRICE_UPDATE_INTERVAL_MS=1000
-    PRICE_VOLATILITY=0.02
-    PRICE_FETCH_TIMEOUT_MS=5000
+    LCW_API_KEY=1b0809f9-08d7-4326-9446-4e2e34150f9a
     ```
 
 4.  **Run the server:**
@@ -85,28 +82,56 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
   - **Description**: Registers a new user.
   - **Body**: `{ "username": "test", "email": "test@example.com", "password": "password123" }`
   - **Response**: `{ "token": "...", "user": { ... } }`
+  - **Example Request**:
+    ```bash
+    curl -X POST http://localhost:5000/api/auth/register \
+      -H "Content-Type: application/json" \
+      -d '{"username": "test", "email": "test@example.com", "password": "password123"}'
+    ```
 
 - `POST /login`
   - **Description**: Logs in an existing user.
   - **Body**: `{ "email": "test@example.com", "password": "password123" }`
   - **Response**: `{ "token": "...", "user": { ... } }`
+  - **Example Request**:
+    ```bash
+    curl -X POST http://localhost:5000/api/auth/login \
+      -H "Content-Type: application/json" \
+      -d '{"email": "test@example.com", "password": "password123"}'
+    ```
 
 - `GET /me`
   - **Description**: Retrieves the profile of the currently authenticated user.
   - **Auth**: Required.
   - **Response**: `{ "user": { ... } }`
+  - **Example Request**:
+    ```bash
+    curl -X GET http://localhost:5000/api/auth/me \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN"
+    ```
 
 ### Prices (`/api/prices`)
 
 - `GET /`
   - **Description**: Fetches the current market prices for all tracked symbols.
   - **Response**: `{ "prices": [ ... ], "canManipulate": boolean }`
+  - **Example Request**:
+    ```bash
+    curl -X GET http://localhost:5000/api/prices
+    ```
 
 - `POST /manipulate`
   - **Description**: **(Admin Only)** Sets a price manipulation schedule for a symbol.
   - **Auth**: Required (User must be an admin).
   - **Body**: `{ "symbol": "BTCUSDT", "startTime": "ISO_DATE_STRING", "endTime": "ISO_DATE_STRING", "endValue": 65000 }`
   - **Response**: `{ "message": "...", "manipulation": { ... } }`
+  - **Example Request**:
+    ```bash
+    curl -X POST http://localhost:5000/api/prices/manipulate \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"symbol": "BTCUSDT", "startTime": "2023-10-01T00:00:00Z", "endTime": "2023-10-01T01:00:00Z", "endValue": 65000}'
+    ```
 
 ### Charts (`/api/charts`)
 
@@ -117,6 +142,10 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
     - `interval` (required): e.g., `1h`, `4h`, `1d`
     - `limit` (optional): Number of candles, defaults to 100.
   - **Response**: `{ "symbol": "...", "interval": "...", "data": [ { "time": UNIX_TS, "open": ..., ... } ] }`
+  - **Example Request**:
+    ```bash
+    curl -X GET "http://localhost:5000/api/charts/klines?symbol=BTCUSDT&interval=1h&limit=50"
+    ```
 
 ### Balance (`/api/balance`)
 
@@ -124,7 +153,7 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
   - **Description**: Gets the current user's USD balance.
   - **Auth**: Required.
   - **Response**: `{ "balance": 10000, "currency": "USD", ... }`
-
+ 
 - `POST /deposit`
   - **Description**: Deposits funds into the user's account.
   - **Auth**: Required.
@@ -143,18 +172,37 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
   - **Description**: Lists all assets in the user's portfolio.
   - **Auth**: Required.
   - **Response**: `{ "assets": [ ... ], "portfolioValue": ..., ... }`
+  - **Example Request**:
+    ```bash
+    curl -X GET http://localhost:5000/api/trade \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN"
+    ```
 
 - `POST /buy`
   - **Description**: Executes a buy order.
   - **Auth**: Required.
-  - **Body**: `{ "crypto": "BTCUSDT", "amount": 0.1, "price": 40000 }`
+  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.1, "price": 40000 }`
   - **Response**: `{ "success": true, "tradeId": "...", ... }`
+  - **Example Request**:
+    ```bash
+    curl -X POST http://localhost:5000/api/trade/buy \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"symbol": "BTCUSDT", "amount": 0.1, "price": 40000}'
+    ```
 
 - `POST /sell`
   - **Description**: Executes a sell order.
   - **Auth**: Required.
-  - **Body**: `{ "crypto": "BTCUSDT", "amount": 0.05, "price": 41000 }`
+  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.05, "price": 41000 }`
   - **Response**: `{ "success": true, "tradeId": "...", ... }`
+  - **Example Request**:
+    ```bash
+    curl -X POST http://localhost:5000/api/trade/sell \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"symbol": "BTCUSDT", "amount": 0.05, "price": 41000}'
+    ```
 
 ---
 
@@ -167,7 +215,7 @@ The server provides a WebSocket endpoint for real-time price updates.
 
 ### Subscribing to Price Updates
 
-Simply connect a WebSocket client to the server's root URL. Once connected, the server will automatically push an array of updated price objects every second (or at the interval defined by `PRICE_UPDATE_INTERVAL_MS`).
+Simply connect a WebSocket client to the server's root URL. Once connected, the server will automatically push an array of updated price objects at regular intervals.
 
 **Example Message (Client Receives):**
 
