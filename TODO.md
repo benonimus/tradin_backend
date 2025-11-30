@@ -1,10 +1,6 @@
-- [x] Add balance field to User.js
-- [ ] Create routes/auth.js with register and login endpoints
-- [ ] Fix require paths in routes/balance.js
-- [ ] Fix require paths in routes/trade.js
-=======
-- [x] Move routes/Asset.js to Asset.js in root
-- [x] Add balance field to User.js
-- [x] Create routes/auth.js with register and login endpoints
-- [x] Fix require paths in routes/balance.js
-- [ ] Fix require paths in routes/trade.js
+# TODO: Remove all ccxt calls
+
+## Tasks
+- [x] Remove ccxt usage in routes/charts.js: Replace binance instantiation and fetchOHLCV with direct axios call to Binance klines API
+- [ ] Remove unused binance.close() in services/priceUpdater.js
+- [ ] Test /charts/klines endpoint to ensure functionality remains intact

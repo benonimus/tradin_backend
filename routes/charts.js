@@ -7,9 +7,6 @@ const router = express.Router();
 const LCW_API_KEY = process.env.LCW_API_KEY;
 const LCW_HISTORY_URL = 'https://api.livecoinwatch.com/coins/history';
 
-// Initialize Binance exchange
-const binance = new ccxt.binance();
-
 // Fetch klines (candlestick) data from Binance
 router.get('/klines', async (req, res) => {
   const { symbol, interval, limit } = req.query;
