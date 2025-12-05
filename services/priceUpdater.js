@@ -5,6 +5,7 @@ const WebSocket = require('ws');
 const orderExecutor = require('./orderExecutor');
 let intervalHandle = null;
 const wsConnections = new Map();
+const latestWsPrices = new Map(); // In-memory cache for the latest prices from WebSocket
 
 // Default configuration
 const DEFAULT_SYMBOLS = [
@@ -114,12 +115,12 @@ async function tick(options = {}) {
         newPrice = (await fetchRealPrice(symbol)) || doc.price;
       } else {
         // Before manipulation starts - normal behavior
-        newPrice = (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
+        newPrice = latestWsPrices.get(symbol) || (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
       }
     } else {
       // No active manipulation - use the latest real-time price from WebSocket
+      newPrice = latestWsPrices.get(symbol) || (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
       // Fallback to random change if WebSocket price is not available yet
-      newPrice = (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
     }
 
     doc.price = Number(newPrice.toFixed(8));
@@ -158,8 +159,7 @@ async function connectToBinance(symbol) {
       const trade = JSON.parse(data);
       if (trade && trade.p) {
         const price = parseFloat(trade.p);
-        // Directly update the price in the database
-        await MarketPrice.updateOne({ symbol }, { $set: { price, updatedAt: new Date() } });
+        latestWsPrices.set(symbol, price);
       }
     } catch (error) {
       console.error(`Error processing WebSocket message for ${symbol}:`, error);
@@ -192,11 +192,11 @@ function start(options = {}) {
   seedIfEmpty(DEFAULT_SYMBOLS).catch((err) => console.error('Price seeding error', err));
 
   // Connect to Binance for each symbol
-  // symbols.forEach((symbol) => {
-  //   if (!wsConnections.has(symbol)) {
-  //     connectToBinance(symbol).catch(err => console.error(`Failed to connect to ${symbol} WS:`, err));
-  //   }
-  // });
+  symbols.forEach((symbol) => {
+    if (!wsConnections.has(symbol)) {
+      connectToBinance(symbol).catch(err => console.error(`Failed to connect to ${symbol} WS:`, err));
+    }
+  });
 
   if (intervalHandle) clearInterval(intervalHandle); // Clear existing interval if any
 

@@ -83,6 +83,12 @@ router.post('/buy', auth, async (req, res) => {
 	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount).' });
 	if (amount <= 0) return res.status(400).json({ message: 'Amount must be positive' });
 
+	// Check for existing active conditional orders for this symbol
+	const activeOrders = await ConditionalOrder.findOne({ user: req.user, symbol, status: 'ACTIVE' });
+	if (activeOrders) {
+		return res.status(409).json({ message: `You have an active conditional order for ${symbol}. Please cancel it before placing a new trade.` });
+	}
+
 	try {
 		// Fetch current market price to execute trade, preventing use of stale client-side price
 		const marketPrice = await MarketPrice.findOne({ symbol });
@@ -152,6 +158,13 @@ router.post('/sell', auth, async (req, res) => {
 	const { symbol, amount, takeProfit, stopLoss } = req.body;
 	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount).' });
 	if (amount <= 0) return res.status(400).json({ message: 'Amount must be positive' });
+
+	// Check for existing active conditional orders for this symbol
+	const activeOrders = await ConditionalOrder.findOne({ user: req.user, symbol, status: 'ACTIVE' });
+	if (activeOrders) {
+		return res.status(409).json({ message: `You have an active conditional order for ${symbol}. Please cancel it before placing a new trade.` });
+	}
+
 	try {
 		// Fetch current market price to execute trade
 		const marketPrice = await MarketPrice.findOne({ symbol });
@@ -276,16 +289,15 @@ router.post('/trailing-stop', auth, async (req, res) => {
     }
 });
 
-// Get all open conditional orders for the user
+// Get all conditional orders (active and historical) for the user
 router.get('/orders', auth, async (req, res) => {
     try {
-        const openOrders = await ConditionalOrder.find({
-            user: req.user,
-            status: 'ACTIVE'
+        const orders = await ConditionalOrder.find({
+            user: req.user
         }).sort({ createdAt: -1 });
-        res.json(openOrders);
+        res.json(orders);
     } catch (err) {
-        res.status(500).json({ message: 'Server error fetching open orders.' });
+        res.status(500).json({ message: 'Server error fetching orders.' });
     }
 });
 
