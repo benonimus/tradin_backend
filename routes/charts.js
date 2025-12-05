@@ -97,10 +97,16 @@ router.get('/klines', async (req, res) => {
         if (response.data && response.data.length > 0) {
           data = response.data;
           console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
+        } else {
+          console.log(`[CHARTS] Binance API returned no data for ${normalizedSymbol}`);
         }
       } catch (err) {
         console.error('[CHARTS] Binance API request failed:', err?.message || err);
       }
+    }
+
+    if (!data || data.length === 0) {
+      return res.status(503).json({ message: 'Could not fetch chart data from external providers.', data: [] });
     }
 
     // Check if there's an active price manipulation for this symbol
@@ -108,6 +114,7 @@ router.get('/klines', async (req, res) => {
     let manipulatedData = data;
     if (marketPrice && marketPrice.manipulation) {
       const manip = marketPrice.manipulation || {};
+      let manipulationActive = false;
       // Support both Date objects and numeric timestamps
       const startTime = manip.startTime ? new Date(manip.startTime) : null;
       const endTime = manip.endTime ? new Date(manip.endTime) : null;
@@ -115,71 +122,63 @@ router.get('/klines', async (req, res) => {
 
       if (manip.isActive && startTime && endTime && now >= startTime && now <= endTime) {
         console.log('[CHARTS] Active manipulation found for symbol:', normalizedSymbol);
+        manipulationActive = true;
+      }
 
-        if (data && data.length > 0) {
-          const totalDuration = endTime - startTime;
-          const timeSinceStart = now - startTime;
-          const progress = totalDuration > 0 ? Math.min(timeSinceStart / totalDuration, 1) : 1;
+      if (manipulationActive && data && data.length > 0) {
+        const totalDuration = endTime - startTime;
+        const timeSinceStart = now - startTime;
+        const progress = totalDuration > 0 ? Math.min(timeSinceStart / totalDuration, 1) : 1;
 
-          // Determine a safe start price and target price with fallbacks
-          const lastCandle = data[data.length - 1];
-          const originalLastClose = lastCandle ? parseFloat(lastCandle[4]) : marketPrice.price || 1;
+        // Determine a safe start price and target price with fallbacks
+        const lastCandle = data[data.length - 1];
+        const originalLastClose = lastCandle ? parseFloat(lastCandle[4]) : marketPrice.price || 1;
 
-          const startPrice = (typeof manip.originalPrice === 'number' && !isNaN(manip.originalPrice))
-            ? manip.originalPrice
-            : (marketPrice.price || originalLastClose);
+        const startPrice = manip.originalPrice ?? marketPrice.price ?? originalLastClose;
+        const targetPrice = manip.endValue ?? startPrice;
 
-          const targetPrice = (typeof manip.endValue === 'number' && !isNaN(manip.endValue))
-            ? manip.endValue
-            : startPrice;
+        const priceDifference = targetPrice - startPrice;
+        const currentManipulatedPrice = startPrice + (priceDifference * progress);
 
-          const priceDifference = targetPrice - startPrice;
-          const currentManipulatedPrice = startPrice + (priceDifference * progress);
+        // Calculate scale ratio based on last close
+        const ratio = originalLastClose > 0 ? currentManipulatedPrice / originalLastClose : 1;
 
-          // Calculate scale ratio based on last close
-          const ratio = originalLastClose > 0 ? currentManipulatedPrice / originalLastClose : 1;
+        manipulatedData = data.map((candle) => {
+          // Safely parse numeric OHLC values and apply ratio
+          const o = (parseFloat(candle[1]) || 0) * ratio;
+          const h = (parseFloat(candle[2]) || 0) * ratio;
+          const l = (parseFloat(candle[3]) || 0) * ratio;
+          const c = (parseFloat(candle[4]) || 0) * ratio;
 
-          manipulatedData = data.map((candle) => {
-            // Safely parse numeric OHLC values and apply ratio
-            const o = parseFloat(candle[1]) || 0;
-            const h = parseFloat(candle[2]) || 0;
-            const l = parseFloat(candle[3]) || 0;
-            const c = parseFloat(candle[4]) || 0;
-
-            return [
-              candle[0], // timestamp
-              (o * ratio).toString(),
-              (h * ratio).toString(),
-              (l * ratio).toString(),
-              (c * ratio).toString(),
-              candle[5], // volume
-            ];
-          });
-
-          console.log(`[CHARTS] Scaled ${data.length} candles for ${normalizedSymbol} based on active manipulation.`);
-        }
+          return [candle[0], o.toString(), h.toString(), l.toString(), c.toString(), candle[5]];
+        });
+        console.log(`[CHARTS] Scaled ${data.length} candles for ${normalizedSymbol} based on active manipulation.`);
       }
     }
 
-    if (!manipulatedData || manipulatedData.length === 0) {
-      return res.json({ symbol, interval, data: [] });
-    }
-
-    // Format the data for the frontend
-    const formattedData = manipulatedData.map((d) => ({
-      time: Math.floor(d[0] / 1000), // seconds
-      timestamp: new Date(d[0]).toISOString(),
-      open: parseFloat(d[1]),
-      high: parseFloat(d[2]),
-      low: parseFloat(d[3]),
-      close: parseFloat(d[4]),
-      volume: parseFloat(d[5]) || 0,
-    }));
+    // Combine manipulation mapping and final formatting into a single loop
+    const formattedData = manipulatedData.map((d) => {
+      const timestamp = d[0];
+      const open = parseFloat(d[1]);
+      const high = parseFloat(d[2]);
+      const low = parseFloat(d[3]);
+      const close = parseFloat(d[4]);
+      const volume = parseFloat(d[5]) || 0;
+      return {
+        time: Math.floor(timestamp / 1000), // seconds
+        timestamp: new Date(timestamp).toISOString(),
+        open,
+        high,
+        low,
+        close,
+        volume,
+      };
+    });
 
     res.json({ symbol, interval, data: formattedData });
   } catch (error) {
     console.error('Error fetching klines data:', error?.message || error);
-    res.status(500).json({ message: 'Server error fetching chart data', error: error.message });
+    res.status(500).json({ message: 'Internal server error while processing chart data', error: error.message });
   }
 });
 

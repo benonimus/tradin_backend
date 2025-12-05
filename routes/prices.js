@@ -70,32 +70,25 @@ router.post('/manipulate', auth, async (req, res) => {
       return res.status(404).json({ error: 'Symbol not found' });
     }
 
-    // Set manipulation
-    doc.manipulation = {
+    const manipulationData = {
       startTime: start,
       endTime: end,
       endValue: parseFloat(endValue),
       durationMs: end.getTime() - start.getTime(),
       originalPrice: doc.price,
-      isActive: true,
       adminUserId,
       adminUsername,
     };
 
+    // Set manipulation
+    doc.manipulation = {
+      ...manipulationData,
+      isActive: true,
+    };
     await doc.save();
 
     // Record manipulation in database
-    const manipulationRecord = new Manipulation({
-      symbol,
-      startTime: start,
-      endTime: end,
-      endValue: parseFloat(endValue),
-      adminUserId,
-      adminUsername,
-      originalPrice: doc.price,
-      durationMs: end.getTime() - start.getTime(),
-    });
-
+    const manipulationRecord = new Manipulation({ ...manipulationData, symbol });
     await manipulationRecord.save();
 
     res.json({ message: 'Price manipulation set successfully', manipulation: doc.manipulation });

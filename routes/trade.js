@@ -5,28 +5,37 @@ const auth = require('../middleware/auth');
 const User = require('../User');
 const Asset = require('../Asset');
 const Transaction = require('../Transaction');
+const MarketPrice = require('../MarketPrice');
 
 // List user's assets
 router.get('/', auth, async (req, res) => {
 	try {
 		const assets = await Asset.find({ user: req.user });
-		// Calculate portfolio summaries (using stored averagePrice as proxy for currentPrice)
+		const prices = await MarketPrice.find({});
+		const priceMap = prices.reduce((map, p) => {
+			map[p.symbol] = p.price;
+			return map;
+		}, {});
+
 		let portfolioValue = 0;
 		let totalInvested = 0;
+
 		const assetsFormatted = assets.map((a) => {
-			const currentPrice = a.averagePrice || 0;
+			const currentPrice = priceMap[a.crypto] || a.averagePrice || 0;
 			const totalValue = (a.amount || 0) * currentPrice;
 			const totalCost = (a.amount || 0) * (a.averagePrice || 0);
 			const unrealizedGain = totalValue - totalCost;
 			portfolioValue += totalValue;
 			totalInvested += totalCost;
+
 			return {
 				symbol: a.crypto,
 				quantity: a.amount,
 				averagePrice: a.averagePrice,
 				currentPrice,
 				totalValue,
-				unrealizedGain,
+				totalCost,
+				unrealizedGain: unrealizedGain,
 			};
 		});
 		res.json({ assets: assetsFormatted, portfolioValue, totalInvested, totalGain: portfolioValue - totalInvested });
@@ -37,12 +46,18 @@ router.get('/', auth, async (req, res) => {
 
 // Buy crypto: body { crypto, amount, price }
 router.post('/buy', auth, async (req, res) => {
-	const { symbol, amount, price } = req.body;
-	if (!symbol || typeof amount !== 'number' || typeof price !== 'number') return res.status(400).json({ message: 'Missing or invalid fields' });
-	if (amount <= 0 || price <= 0) return res.status(400).json({ message: 'Amount and price must be positive' });
+	const { symbol, amount } = req.body;
+	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount)' });
+	if (amount <= 0) return res.status(400).json({ message: 'Amount must be positive' });
 
 	try {
+		// Fetch current market price to execute trade, preventing use of stale client-side price
+		const marketPrice = await MarketPrice.findOne({ symbol });
+		if (!marketPrice) return res.status(404).json({ message: 'Symbol not found' });
+		const price = marketPrice.price;
+
 		const user = await User.findById(req.user);
+		if (!user) return res.status(404).json({ message: 'User not found' });
 		const total = amount * price;
 		if (user.balance < total) return res.status(400).json({ message: 'Insufficient funds' });
 
@@ -90,12 +105,18 @@ router.post('/buy', auth, async (req, res) => {
 
 // Sell crypto: body { crypto, amount, price }
 router.post('/sell', auth, async (req, res) => {
-	const { symbol, amount, price } = req.body;
-	if (!symbol || typeof amount !== 'number' || typeof price !== 'number') return res.status(400).json({ message: 'Missing or invalid fields' });
-	if (amount <= 0 || price <= 0) return res.status(400).json({ message: 'Amount and price must be positive' });
+	const { symbol, amount } = req.body;
+	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount)' });
+	if (amount <= 0) return res.status(400).json({ message: 'Amount must be positive' });
 	try {
+		// Fetch current market price to execute trade
+		const marketPrice = await MarketPrice.findOne({ symbol });
+		if (!marketPrice) return res.status(404).json({ message: 'Symbol not found' });
+		const price = marketPrice.price;
+
 		const asset = await Asset.findOne({ user: req.user, crypto: symbol });
 		if (!asset || asset.amount < amount) return res.status(400).json({ message: 'Insufficient holdings' });
+
 
 		const total = amount * price;
 		// Calculate gain/loss vs averagePrice

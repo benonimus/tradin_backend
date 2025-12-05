@@ -113,7 +113,7 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
 - `GET /me`
   - **Description**: Retrieves the profile of the currently authenticated user.
   - **Auth**: Required.
-  - **Response**: `{ "user": { ... } }`
+  - **Response**: `{ "user": { "id": "...", "username": "...", "email": "...", "isAdmin": false, "createdAt": "ISO_DATE_STRING" } }`
   - **Example Request**:
     ```bash
     curl -X GET http://localhost:5000/api/auth/me \
@@ -133,14 +133,14 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
 - `POST /manipulate`
   - **Description**: **(Admin Only)** Sets a price manipulation schedule for a symbol.
   - **Auth**: Required (User must be an admin).
-  - **Body**: `{ "symbol": "BTCUSDT", "startTime": "ISO_DATE_STRING", "endTime": "ISO_DATE_STRING", "endValue": 65000 }`
+  - **Body**: `{ "symbol": "BTCUSDT", "startTime": "ISO_DATE_STRING", "endTime": "ISO_DATE_STRING", "endValue": 65000, "adminUserId": "...", "adminUsername": "..." }`
   - **Response**: `{ "message": "...", "manipulation": { ... } }`
   - **Example Request**:
     ```bash
     curl -X POST http://localhost:5000/api/prices/manipulate \
       -H "Authorization: Bearer YOUR_JWT_TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "startTime": "2023-10-01T00:00:00Z", "endTime": "2023-10-01T01:00:00Z", "endValue": 65000}'
+      -d '{"symbol": "BTCUSDT", "startTime": "2023-10-01T00:00:00Z", "endTime": "2023-10-01T01:00:00Z", "endValue": 65000, "adminUserId": "63f...", "adminUsername": "admin"}'
     ```
 
 ### Charts (`/api/charts`)
@@ -162,7 +162,7 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
 - `GET /`
   - **Description**: Gets the current user's USD balance.
   - **Auth**: Required.
-  - **Response**: `{ "balance": 10000, "currency": "USD", ... }`
+  - **Response**: `{ "balance": 10000, "currency": "USD", "availableBalance": 10000, "lockedBalance": 0 }`
  
 - `POST /deposit`
   - **Description**: Deposits funds into the user's account.
@@ -191,27 +191,27 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
 - `POST /buy`
   - **Description**: Executes a buy order.
   - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.1, "price": 40000 }`
+  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.1 }`
   - **Response**: `{ "success": true, "tradeId": "...", ... }`
   - **Example Request**:
     ```bash
     curl -X POST http://localhost:5000/api/trade/buy \
       -H "Authorization: Bearer YOUR_JWT_TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "amount": 0.1, "price": 40000}'
+      -d '{"symbol": "BTCUSDT", "amount": 0.1}'
     ```
 
 - `POST /sell`
   - **Description**: Executes a sell order.
   - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.05, "price": 41000 }`
+  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.05 }`
   - **Response**: `{ "success": true, "tradeId": "...", ... }`
   - **Example Request**:
     ```bash
     curl -X POST http://localhost:5000/api/trade/sell \
       -H "Authorization: Bearer YOUR_JWT_TOKEN" \
       -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "amount": 0.05, "price": 41000}'
+      -d '{"symbol": "BTCUSDT", "amount": 0.05}'
     ```
 
 ---
