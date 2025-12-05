@@ -6,7 +6,7 @@ const User = require('../User');
 const Asset = require('../Asset');
 const Transaction = require('../Transaction');
 const MarketPrice = require('../MarketPrice');
-const ConditionalOrder = require('../models/ConditionalOrder');
+const ConditionalOrder = require('../ConditionalOrder');
 
 // List user's assets
 router.get('/', auth, async (req, res) => {

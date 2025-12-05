@@ -5,7 +5,7 @@ const cors = require('cors');
 const http = require('http');
 const { WebSocketServer } = require('ws');
 const priceUpdater = require('./services/priceUpdater');
-require('./models/ConditionalOrder'); // Ensures model is registered
+require('./ConditionalOrder'); // Ensures model is registered
 
 // Load env vars
 dotenv.config();
