@@ -25,9 +25,13 @@ router.get('/', async (req, res) => {
     let canManipulate = false;
     const token = req.header('Authorization')?.replace('Bearer ', '');
     if (token) {
-      jwt.verify(token, process.env.JWT_SECRET || 'devsecret', (err, decoded) => {
-        if (!err && decoded) canManipulate = !!decoded.isAdmin;
-      });
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'devsecret');
+        canManipulate = !!decoded.isAdmin;
+      } catch (err) {
+        // Token is invalid or expired, canManipulate remains false
+        console.log('Could not verify token for canManipulate check:', err.message);
+      }
     }
 
     res.json({ prices: sanitizedPrices, canManipulate });
