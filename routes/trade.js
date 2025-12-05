@@ -8,6 +8,38 @@ const Transaction = require('../models/Transaction');
 const MarketPrice = require('../models/MarketPrice');
 const ConditionalOrder = require('../models/ConditionalOrder');
 
+/**
+ * Creates Take Profit and/or Stop Loss conditional orders after a trade.
+ * @param {object} params - The parameters for creating the orders.
+ * @param {string} params.user - The user ID.
+ * @param {string} params.symbol - The trading symbol.
+ * @param {number} params.amount - The amount of the asset.
+ * @param {string} params.side - The side of the conditional orders ('BUY' or 'SELL').
+ * @param {number} [params.takeProfit] - The take-profit price.
+ * @param {number} [params.stopLoss] - The stop-loss price.
+ * @returns {Promise<Array>} A promise that resolves to an array of created orders.
+ */
+async function createConditionalOrders({ user, symbol, amount, side, takeProfit, stopLoss }) {
+  const createdOrders = [];
+  const orderBase = { user, symbol, amount, side, type: 'STOP_LIMIT' };
+
+  // Create a Take-Profit order (acts as a stop-limit order in reverse)
+  if (takeProfit && typeof takeProfit === 'number' && takeProfit > 0) {
+    const tpOrder = new ConditionalOrder({ ...orderBase, stopPrice: takeProfit, limitPrice: takeProfit });
+    await tpOrder.save();
+    createdOrders.push(tpOrder);
+  }
+
+  // Create a Stop-Loss order
+  if (stopLoss && typeof stopLoss === 'number' && stopLoss > 0) {
+    const slOrder = new ConditionalOrder({ ...orderBase, stopPrice: stopLoss, limitPrice: stopLoss });
+    await slOrder.save();
+    createdOrders.push(slOrder);
+  }
+
+  return createdOrders;
+}
+
 // List user's assets
 router.get('/', auth, async (req, res) => {
 	try {
@@ -47,8 +79,8 @@ router.get('/', auth, async (req, res) => {
 
 // Buy crypto: body { crypto, amount, price }
 router.post('/buy', auth, async (req, res) => {
-	const { symbol, amount } = req.body;
-	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount)' });
+	const { symbol, amount, takeProfit, stopLoss } = req.body;
+	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount).' });
 	if (amount <= 0) return res.status(400).json({ message: 'Amount must be positive' });
 
 	try {
@@ -86,6 +118,16 @@ router.post('/buy', auth, async (req, res) => {
 		const tx = new Transaction({ user: req.user, type: 'trade', amount: -total });
 		await tx.save();
 
+		// Create Take-Profit and/or Stop-Loss orders if specified
+		const conditionalOrders = await createConditionalOrders({
+			user: req.user,
+			symbol,
+			amount,
+			side: 'SELL', // TP/SL for a buy is a sell
+			takeProfit,
+			stopLoss,
+		});
+
 		const trade = {
 			success: true,
 			tradeId: tx._id,
@@ -96,6 +138,7 @@ router.post('/buy', auth, async (req, res) => {
 			fee,
 			timestamp: tx.date,
 			newBalance: user.balance,
+			conditionalOrders: conditionalOrders.map(o => o._id),
 		};
 
 		res.status(201).json(trade);
@@ -106,8 +149,8 @@ router.post('/buy', auth, async (req, res) => {
 
 // Sell crypto: body { crypto, amount, price }
 router.post('/sell', auth, async (req, res) => {
-	const { symbol, amount } = req.body;
-	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount)' });
+	const { symbol, amount, takeProfit, stopLoss } = req.body;
+	if (!symbol || typeof amount !== 'number') return res.status(400).json({ message: 'Missing or invalid fields (symbol, amount).' });
 	if (amount <= 0) return res.status(400).json({ message: 'Amount must be positive' });
 	try {
 		// Fetch current market price to execute trade
@@ -137,6 +180,16 @@ router.post('/sell', auth, async (req, res) => {
 		const tx = new Transaction({ user: req.user, type: 'trade', amount: total });
 		await tx.save();
 
+		// Create Take-Profit and/or Stop-Loss orders if specified
+		const conditionalOrders = await createConditionalOrders({
+			user: req.user,
+			symbol,
+			amount,
+			side: 'BUY', // TP/SL for a sell is a buy
+			takeProfit,
+			stopLoss,
+		});
+
 		res.status(201).json({
 			success: true,
 			tradeId: tx._id,
@@ -149,6 +202,7 @@ router.post('/sell', auth, async (req, res) => {
 			timestamp: tx.date,
 			newBalance: user.balance,
 			gainLoss,
+			conditionalOrders: conditionalOrders.map(o => o._id),
 		});
 	} catch (err) {
 		res.status(500).json({ message: 'Server error' });

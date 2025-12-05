@@ -98,4 +98,26 @@ router.post('/manipulate', auth, async (req, res) => {
   }
 });
 
+// DELETE /api/prices/manipulations/clear - Clear all active price manipulations
+router.delete('/manipulations/clear', auth, async (req, res) => {
+  // Only admin/authorized users may clear manipulations
+  if (!req.isAdmin) {
+    return res.status(403).json({ error: 'Forbidden: not authorized to clear manipulations' });
+  }
+
+  try {
+    const result = await MarketPrice.updateMany(
+      { 'manipulation.isActive': true },
+      { $set: { 'manipulation.isActive': false } }
+    );
+
+    const message = `Cleared ${result.modifiedCount} active price manipulation(s). Prices will revert to market value on the next tick.`;
+    console.log(`[ADMIN] ${message}`);
+    res.json({ success: true, message, clearedCount: result.modifiedCount });
+  } catch (err) {
+    console.error('DELETE /api/prices/manipulations/clear error', err);
+    res.status(500).json({ error: 'Failed to clear price manipulations' });
+  }
+});
+
 module.exports = router;
