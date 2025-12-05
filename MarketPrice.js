@@ -12,6 +12,8 @@ const MarketPriceSchema = new mongoose.Schema({
     durationMs: { type: Number }, // Duration of manipulation in milliseconds
     originalPrice: { type: Number }, // Price before manipulation started
     isActive: { type: Boolean, default: false },
+    adminUserId: { type: String },
+    adminUsername: { type: String },
   },
 });
 

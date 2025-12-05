@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const MarketPrice = require('../MarketPrice');
+const Manipulation = require('../Manipulation');
 const jwt = require('jsonwebtoken');
 const auth = require('../middleware/auth');
 
@@ -47,10 +48,10 @@ router.post('/manipulate', auth, async (req, res) => {
   if (!req.isAdmin) return res.status(403).json({ error: 'Forbidden: not authorized to manipulate prices' });
 
   try {
-    const { symbol, startTime, endTime, endValue } = req.body;
+    const { symbol, startTime, endTime, endValue, adminUserId, adminUsername } = req.body;
 
-    if (!symbol || !startTime || !endTime || endValue === undefined) {
-      return res.status(400).json({ error: 'symbol, startTime, endTime, and endValue are required' });
+    if (!symbol || !startTime || !endTime || endValue === undefined || !adminUserId || !adminUsername) {
+      return res.status(400).json({ error: 'symbol, startTime, endTime, endValue, adminUserId, and adminUsername are required' });
     }
 
     const start = new Date(startTime);
@@ -77,9 +78,25 @@ router.post('/manipulate', auth, async (req, res) => {
       durationMs: end.getTime() - start.getTime(),
       originalPrice: doc.price,
       isActive: true,
+      adminUserId,
+      adminUsername,
     };
 
     await doc.save();
+
+    // Record manipulation in database
+    const manipulationRecord = new Manipulation({
+      symbol,
+      startTime: start,
+      endTime: end,
+      endValue: parseFloat(endValue),
+      adminUserId,
+      adminUsername,
+      originalPrice: doc.price,
+      durationMs: end.getTime() - start.getTime(),
+    });
+
+    await manipulationRecord.save();
 
     res.json({ message: 'Price manipulation set successfully', manipulation: doc.manipulation });
   } catch (err) {
