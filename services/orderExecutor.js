@@ -1,4 +1,5 @@
-const ConditionalOrder = require('../ConditionalOrder');
+const mongoose = require('mongoose');
+const ConditionalOrder = require('../models/ConditionalOrder');
 const MarketPrice = require('../models/MarketPrice');
 const User =require('../models/User');
 const Asset = require('../models/Asset');

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const MarketPrice = require('../MarketPrice');
-const Manipulation = require('../Manipulation');
+const MarketPrice = require('../models/MarketPrice');
+const Manipulation = require('../models/Manipulation');
 const jwt = require('jsonwebtoken');
 const auth = require('../middleware/auth');
 

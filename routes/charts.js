@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 // Assuming the Manipulation model is located at the specified path
-const Manipulation = require('../models/Manipulation'); 
+const Manipulation = require('../models/Manipulation');
 const router = express.Router();
 
 // Environment variables

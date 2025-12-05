@@ -2,11 +2,11 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
-const User = require('../User');
-const Asset = require('../Asset');
-const Transaction = require('../Transaction');
-const MarketPrice = require('../MarketPrice');
-const ConditionalOrder = require('../ConditionalOrder');
+const User = require('../models/User');
+const Asset = require('../models/Asset');
+const Transaction = require('../models/Transaction');
+const MarketPrice = require('../models/MarketPrice');
+const ConditionalOrder = require('../models/ConditionalOrder');
 
 // List user's assets
 router.get('/', auth, async (req, res) => {

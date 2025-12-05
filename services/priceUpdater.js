@@ -1,4 +1,4 @@
-const MarketPrice = require('../MarketPrice');
+const MarketPrice = require('../models/MarketPrice');
 const axios = require('axios');
 const WebSocket = require('ws');
 
