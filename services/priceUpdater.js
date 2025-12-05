@@ -2,6 +2,7 @@ const MarketPrice = require('../MarketPrice');
 const axios = require('axios');
 const WebSocket = require('ws');
 
+const orderExecutor = require('./orderExecutor');
 let intervalHandle = null;
 const wsConnections = new Map();
 
@@ -124,6 +125,9 @@ async function tick(options = {}) {
     doc.price = Number(newPrice.toFixed(8));
     doc.updatedAt = now;
     await doc.save();
+
+    // Notify the order executor of the price change
+    await orderExecutor.processPriceUpdate(symbol, doc.price);
     updatedPrices.push(doc);
   }
 

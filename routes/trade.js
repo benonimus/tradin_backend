@@ -6,6 +6,7 @@ const User = require('../User');
 const Asset = require('../Asset');
 const Transaction = require('../Transaction');
 const MarketPrice = require('../MarketPrice');
+const ConditionalOrder = require('../models/ConditionalOrder');
 
 // List user's assets
 router.get('/', auth, async (req, res) => {
@@ -152,6 +153,107 @@ router.post('/sell', auth, async (req, res) => {
 	} catch (err) {
 		res.status(500).json({ message: 'Server error' });
 	}
+});
+
+// --- Advanced Order Routes ---
+
+// Place a Stop-Limit Order
+router.post('/stop-limit', auth, async (req, res) => {
+  const { symbol, side, amount, stopPrice, limitPrice } = req.body;
+  if (!symbol || !side || !amount || !stopPrice || !limitPrice) {
+    return res.status(400).json({ message: 'symbol, side, amount, stopPrice, and limitPrice are required.' });
+  }
+  if (amount <= 0) return res.status(400).json({ message: 'Amount must be positive' });
+
+  try {
+    // Basic validation
+    if (side === 'BUY' && stopPrice >= limitPrice) {
+        return res.status(400).json({ message: 'For BUY orders, stopPrice must be less than limitPrice.' });
+    }
+    if (side === 'SELL' && stopPrice <= limitPrice) {
+        return res.status(400).json({ message: 'For SELL orders, stopPrice must be greater than limitPrice.' });
+    }
+
+    const order = new ConditionalOrder({
+      user: req.user,
+      symbol,
+      side,
+      type: 'STOP_LIMIT',
+      amount,
+      stopPrice,
+      limitPrice,
+    });
+    await order.save();
+    res.status(201).json(order);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error placing stop-limit order.' });
+  }
+});
+
+// Place a Trailing Stop Order
+router.post('/trailing-stop', auth, async (req, res) => {
+    const { symbol, side, amount, trailingDelta } = req.body;
+    if (!symbol || !side || !amount || !trailingDelta || !trailingDelta.value || !trailingDelta.type) {
+        return res.status(400).json({ message: 'symbol, side, amount, and a valid trailingDelta object are required.' });
+    }
+    if (trailingDelta.value <= 0) return res.status(400).json({ message: 'Trailing delta value must be positive.' });
+
+    try {
+        const marketPrice = await MarketPrice.findOne({ symbol });
+        if (!marketPrice) return res.status(404).json({ message: 'Symbol not found' });
+
+        const order = new ConditionalOrder({
+            user: req.user,
+            symbol,
+            side,
+            type: 'TRAILING_STOP',
+            amount,
+            trailingDelta: {
+                type: trailingDelta.type, // 'PERCENTAGE' or 'ABSOLUTE'
+                value: trailingDelta.value,
+            },
+            // Set the initial reference price to the current market price
+            trailingReferencePrice: marketPrice.price,
+        });
+        await order.save();
+        res.status(201).json(order);
+    } catch (err) {
+        res.status(500).json({ message: 'Server error placing trailing-stop order.' });
+    }
+});
+
+// Get all open conditional orders for the user
+router.get('/orders', auth, async (req, res) => {
+    try {
+        const openOrders = await ConditionalOrder.find({
+            user: req.user,
+            status: 'ACTIVE'
+        }).sort({ createdAt: -1 });
+        res.json(openOrders);
+    } catch (err) {
+        res.status(500).json({ message: 'Server error fetching open orders.' });
+    }
+});
+
+// Cancel an open conditional order
+router.delete('/orders/:id', auth, async (req, res) => {
+    try {
+        const order = await ConditionalOrder.findOne({
+            _id: req.params.id,
+            user: req.user,
+        });
+
+        if (!order) return res.status(404).json({ message: 'Order not found.' });
+        if (order.status !== 'ACTIVE') return res.status(400).json({ message: 'Only active orders can be canceled.' });
+
+        order.status = 'CANCELED';
+        order.canceledAt = new Date();
+        await order.save();
+
+        res.json({ message: 'Order canceled successfully.', order });
+    } catch (err) {
+        res.status(500).json({ message: 'Server error canceling order.' });
+    }
 });
 
 module.exports = router;

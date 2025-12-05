@@ -13,6 +13,7 @@ A unique feature of this platform is the ability for an administrator to simulat
 - **Portfolio & Balance Management**: Tracks user-owned assets, average buy price, and available USD balance.
 - **Transaction History**: Logs all deposits, withdrawals, and trades.
 - **Candlestick Chart Data**: Provides historical OHLCV (Open, High, Low, Close, Volume) data for charting libraries.
+- **Advanced Order Types**: Supports Stop-Limit, Trailing Stop, and One-Cancels-the-Other (OCO) orders via a dedicated order execution engine.
 - **Admin Price Manipulation**: A special, admin-only feature to programmatically manipulate the price of an asset over a set duration.
 
 ## Tech Stack
@@ -213,6 +214,50 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
       -H "Content-Type: application/json" \
       -d '{"symbol": "BTCUSDT", "amount": 0.05}'
     ```
+
+- `POST /buy`
+  - **Description**: Executes a buy order.
+  - **Auth**: Required.
+  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.1 }`
+  - **Response**: `{ "success": true, "tradeId": "...", ... }`
+  - **Example Request**:
+    ```bash
+    curl -X POST http://localhost:5000/api/trade/buy \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"symbol": "BTCUSDT", "amount": 0.1}'
+    ```
+
+- `POST /sell`
+  - **Description**: Executes a sell order.
+  - **Auth**: Required.
+  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.05 }`
+  - **Response**: `{ "success": true, "tradeId": "...", ... }`
+  - **Example Request**:
+    ```bash
+    curl -X POST http://localhost:5000/api/trade/sell \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d '{"symbol": "BTCUSDT", "amount": 0.05}'
+    ```
+
+- `POST /stop-limit`
+  - **Description**: Places a conditional Stop-Limit order.
+  - **Auth**: Required.
+  - **Body**: `{ "symbol": "BTCUSDT", "side": "SELL", "amount": 0.1, "stopPrice": 49000, "limitPrice": 48950 }`
+
+- `POST /trailing-stop`
+  - **Description**: Places a conditional Trailing Stop order.
+  - **Auth**: Required.
+  - **Body**: `{ "symbol": "BTCUSDT", "side": "SELL", "amount": 0.1, "trailingDelta": { "type": "PERCENTAGE", "value": 5 } }`
+
+- `GET /orders`
+  - **Description**: Retrieves all active conditional orders for the user.
+  - **Auth**: Required.
+
+- `DELETE /orders/:id`
+  - **Description**: Cancels an active conditional order.
+  - **Auth**: Required.
 
 ---
 

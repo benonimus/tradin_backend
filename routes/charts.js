@@ -1,13 +1,27 @@
 const express = require('express');
 const axios = require('axios');
-const MarketPrice = require('../MarketPrice');
+// Assuming the Manipulation model is located at the specified path
+const Manipulation = require('../models/Manipulation'); 
 const router = express.Router();
 
 // Environment variables
 const LCW_API_KEY = process.env.LCW_API_KEY;
 const LCW_HISTORY_URL = 'https://api.livecoinwatch.com/coins/history';
 
-// Fetch klines (candlestick) data from Binance
+// Helper to convert interval string (e.g., '1h', '1d') to total milliseconds
+const intervalToMs = (interval) => {
+  const unit = interval.slice(-1);
+  const value = parseInt(interval.slice(0, -1));
+  const multipliers = {
+    m: 60 * 1000,
+    h: 60 * 60 * 1000,
+    d: 24 * 60 * 60 * 1000,
+    w: 7 * 24 * 60 * 60 * 1000,
+  };
+  return value * (multipliers[unit] || 0);
+};
+
+// Fetch klines (candlestick) data from Binance or LiveCoinWatch
 router.get('/klines', async (req, res) => {
   const { symbol, interval, limit } = req.query;
   // Normalize symbol (accept both BTCUSDT and BTC/USDT from clients)
@@ -25,6 +39,29 @@ router.get('/klines', async (req, res) => {
     return res.status(400).json({ message: 'Invalid interval' });
   }
 
+  // Calculate the time range for fetching both klines and historical manipulations
+  const now = Date.now();
+  const limitNum = limit ? parseInt(limit, 10) : 100;
+  const intervalMs = intervalToMs(interval);
+  // Calculate the start time of the first candle we expect to fetch
+  const startTimeForKlines = now - limitNum * intervalMs;
+
+  let manipulations = [];
+  try {
+    // Fetch historical manipulations that overlap with the chart's time range
+    manipulations = await Manipulation.find({
+      symbol: normalizedSymbol,
+      startTime: { $lt: new Date(now) },
+      endTime: { $gt: new Date(startTimeForKlines) },
+    }).lean();
+    // Sort manipulations by startTime for deterministic processing
+    manipulations.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    console.log(`[CHARTS] Found ${manipulations.length} historical manipulations for ${normalizedSymbol}.`);
+  } catch (err) {
+    console.error('[CHARTS] Error fetching historical manipulations:', err?.message || err);
+    // Continue without manipulations if the DB query fails
+  }
+
   try {
     // Try LiveCoinWatch history endpoint when key is present and interval supported
     let data = null;
@@ -35,13 +72,14 @@ router.get('/klines', async (req, res) => {
       '1h': 3600,
       '4h': 14400,
       '1d': 86400,
+      // LCW history API does not reliably support '1w' or longer
     };
 
     if (LCW_API_KEY && Object.prototype.hasOwnProperty.call(intervalToSeconds, interval)) {
       try {
         const step = intervalToSeconds[interval];
-        const end = Math.floor(Date.now() / 1000);
-        const start = end - (Number(limit || 100) * step);
+        const end = Math.floor(now / 1000); // Use calculated 'now'
+        const start = Math.floor(startTimeForKlines / 1000); // Use calculated chart start time
         const code = (normalizedSymbol || '').replace(/USDT$|USD$/i, '');
 
         const body = { currency: 'USD', code, start, end, step };
@@ -82,15 +120,13 @@ router.get('/klines', async (req, res) => {
     // If LCW didn't provide data, fall back to Binance
     if (!data) {
       console.log(`[CHARTS] Falling back to Binance API for ${normalizedSymbol}`);
-      // Fetch OHLCV data from Binance using direct API call
-      // Binance klines API returns data in the format: [timestamp, open, high, low, close, volume, ...]
       try {
-        const limitNum = limit ? parseInt(limit, 10) : 100;
         const response = await axios.get(`https://api.binance.com/api/v3/klines`, {
           params: {
             symbol: normalizedSymbol,
             interval: interval,
             limit: limitNum,
+            startTime: startTimeForKlines, // Request data starting from calculated time
           },
           timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
         });
@@ -109,56 +145,73 @@ router.get('/klines', async (req, res) => {
       return res.status(503).json({ message: 'Could not fetch chart data from external providers.', data: [] });
     }
 
-    // Check if there's an active price manipulation for this symbol
-    const marketPrice = await MarketPrice.findOne({ symbol: normalizedSymbol });
     let manipulatedData = data;
-    if (marketPrice && marketPrice.manipulation) {
-      const manip = marketPrice.manipulation || {};
-      let manipulationActive = false;
-      // Support both Date objects and numeric timestamps
-      const startTime = manip.startTime ? new Date(manip.startTime) : null;
-      const endTime = manip.endTime ? new Date(manip.endTime) : null;
-      const now = new Date();
 
-      if (manip.isActive && startTime && endTime && now >= startTime && now <= endTime) {
-        console.log('[CHARTS] Active manipulation found for symbol:', normalizedSymbol);
-        manipulationActive = true;
-      }
+    // Apply per-candle historical manipulation if found
+    if (manipulations.length > 0) {
+      manipulatedData = data.map((kline) => {
+        // kline format: [openTime, open, high, low, close, volume, ...]
+        const candleTimestamp = Number(kline[0]);
+        let candle = {
+          time: candleTimestamp, // MS
+          open: parseFloat(kline[1]),
+          high: parseFloat(kline[2]),
+          low: parseFloat(kline[3]),
+          close: parseFloat(kline[4]),
+          volume: parseFloat(kline[5]),
+        };
 
-      if (manipulationActive && data && data.length > 0) {
-        const totalDuration = endTime - startTime;
-        const timeSinceStart = now - startTime;
-        const progress = totalDuration > 0 ? Math.min(timeSinceStart / totalDuration, 1) : 1;
+        // Check if this candle is inside any manipulation period
+        for (const manip of manipulations) {
+          const manipStartTime = new Date(manip.startTime).getTime();
+          const manipEndTime = new Date(manip.endTime).getTime();
 
-        // Determine a safe start price and target price with fallbacks
-        const lastCandle = data[data.length - 1];
-        const originalLastClose = lastCandle ? parseFloat(lastCandle[4]) : marketPrice.price || 1;
+          // A candle is 'inside' if its open time is within the manipulation duration
+          if (
+            candleTimestamp >= manipStartTime &&
+            candleTimestamp < manipEndTime
+          ) {
+            const manipDuration = manipEndTime - manipStartTime;
+            const timeIntoManip = candleTimestamp - manipStartTime;
 
-        const startPrice = manip.originalPrice ?? marketPrice.price ?? originalLastClose;
-        const targetPrice = manip.endValue ?? startPrice;
+            // Calculate progress (clamped between 0 and 1)
+            const progress = Math.max(0, Math.min(1, timeIntoManip / (manipDuration || 1)));
 
-        const priceDifference = targetPrice - startPrice;
-        const currentManipulatedPrice = startPrice + (priceDifference * progress);
+            // Interpolate price based on the candle's open price as the starting point
+            // This mirrors the logic in your first snippet.
+            const startPrice = candle.open;
+            const targetPrice = manip.endValue;
 
-        // Calculate scale ratio based on last close
-        const ratio = originalLastClose > 0 ? currentManipulatedPrice / originalLastClose : 1;
+            const manipulatedPrice = startPrice + (targetPrice - startPrice) * progress;
 
-        manipulatedData = data.map((candle) => {
-          // Safely parse numeric OHLC values and apply ratio
-          const o = (parseFloat(candle[1]) || 0) * ratio;
-          const h = (parseFloat(candle[2]) || 0) * ratio;
-          const l = (parseFloat(candle[3]) || 0) * ratio;
-          const c = (parseFloat(candle[4]) || 0) * ratio;
+            // Adjust OHLC values. Close is the interpolated price. High/Low must encompass it.
+            candle.close = manipulatedPrice;
+            candle.high = Math.max(candle.high, manipulatedPrice);
+            candle.low = Math.min(candle.low, manipulatedPrice);
 
-          return [candle[0], o.toString(), h.toString(), l.toString(), c.toString(), candle[5]];
-        });
-        console.log(`[CHARTS] Scaled ${data.length} candles for ${normalizedSymbol} based on active manipulation.`);
-      }
+            // Since manipulations are sorted, we can stop at the last applicable one
+            // if we assume non-overlapping or that the last one applied should win.
+            // Keeping the loop ensures all overlapping are processed if needed, but often
+            // one manip per time interval is expected.
+          }
+        }
+
+        // Return the modified kline format: [timestamp, open, high, low, close, volume]
+        return [
+          candle.time.toString(),
+          candle.open.toString(),
+          candle.high.toString(),
+          candle.low.toString(),
+          candle.close.toString(),
+          candle.volume.toString(),
+        ];
+      });
+      console.log(`[CHARTS] Applied historical manipulation to ${manipulatedData.length} candles.`);
     }
 
-    // Combine manipulation mapping and final formatting into a single loop
+    // Final formatting into the desired object structure
     const formattedData = manipulatedData.map((d) => {
-      const timestamp = d[0];
+      const timestamp = Number(d[0]); // Ensure it's a number
       const open = parseFloat(d[1]);
       const high = parseFloat(d[2]);
       const low = parseFloat(d[3]);
@@ -175,7 +228,7 @@ router.get('/klines', async (req, res) => {
       };
     });
 
-    res.json({ symbol, interval, data: formattedData });
+    res.json({ symbol: normalizedSymbol, interval, data: formattedData });
   } catch (error) {
     console.error('Error fetching klines data:', error?.message || error);
     res.status(500).json({ message: 'Internal server error while processing chart data', error: error.message });
