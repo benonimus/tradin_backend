@@ -37,23 +37,23 @@ router.get('/', auth, async (req, res) => {
 
 // Buy crypto: body { crypto, amount, price }
 router.post('/buy', auth, async (req, res) => {
-	const { crypto, amount, price } = req.body;
-	if (!crypto || typeof amount !== 'number' || typeof price !== 'number') return res.status(400).json({ message: 'Missing or invalid fields' });
+	const { symbol, amount, price } = req.body;
+	if (!symbol || typeof amount !== 'number' || typeof price !== 'number') return res.status(400).json({ message: 'Missing or invalid fields' });
 	if (amount <= 0 || price <= 0) return res.status(400).json({ message: 'Amount and price must be positive' });
 
 	try {
 		const user = await User.findById(req.user);
 		const total = amount * price;
-		if (user.balance < total) return res.status(422).json({ message: 'Insufficient funds' });
+		if (user.balance < total) return res.status(400).json({ message: 'Insufficient funds' });
 
 		// Deduct balance
 		user.balance -= total;
 		await user.save();
 
 		// Add or update asset
-		let asset = await Asset.findOne({ user: req.user, crypto });
+		let asset = await Asset.findOne({ user: req.user, crypto: symbol });
 		if (!asset) {
-			asset = new Asset({ user: req.user, crypto, amount, averagePrice: price });
+			asset = new Asset({ user: req.user, crypto: symbol, amount, averagePrice: price });
 		} else {
 			// Recalculate average price
 			const prevAmount = asset.amount || 0;
@@ -73,7 +73,7 @@ router.post('/buy', auth, async (req, res) => {
 		const trade = {
 			success: true,
 			tradeId: tx._id,
-			symbol: crypto,
+			symbol: symbol,
 			quantity: amount,
 			price,
 			totalCost: total,
@@ -90,12 +90,12 @@ router.post('/buy', auth, async (req, res) => {
 
 // Sell crypto: body { crypto, amount, price }
 router.post('/sell', auth, async (req, res) => {
-	const { crypto, amount, price } = req.body;
-	if (!crypto || typeof amount !== 'number' || typeof price !== 'number') return res.status(400).json({ message: 'Missing or invalid fields' });
+	const { symbol, amount, price } = req.body;
+	if (!symbol || typeof amount !== 'number' || typeof price !== 'number') return res.status(400).json({ message: 'Missing or invalid fields' });
 	if (amount <= 0 || price <= 0) return res.status(400).json({ message: 'Amount and price must be positive' });
 	try {
-		const asset = await Asset.findOne({ user: req.user, crypto });
-		if (!asset || asset.amount < amount) return res.status(422).json({ message: 'Insufficient holdings' });
+		const asset = await Asset.findOne({ user: req.user, crypto: symbol });
+		if (!asset || asset.amount < amount) return res.status(400).json({ message: 'Insufficient holdings' });
 
 		const total = amount * price;
 		// Calculate gain/loss vs averagePrice
@@ -118,7 +118,7 @@ router.post('/sell', auth, async (req, res) => {
 		res.status(201).json({
 			success: true,
 			tradeId: tx._id,
-			symbol: crypto,
+			symbol: symbol,
 			quantity: amount,
 			price,
 			totalProceeds: total,

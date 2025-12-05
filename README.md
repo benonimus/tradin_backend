@@ -26,6 +26,16 @@ A unique feature of this platform is the ability for an administrator to simulat
 
 ---
 
+## Live Demo
+
+The backend is deployed on Render and is accessible at the following base URL:
+
+`https://tradin-backend-1.onrender.com`
+
+All API endpoints listed below can be accessed using this URL. For example, the `/api/prices` endpoint is available at `https://tradin-backend-1.onrender.com/api/prices`. The WebSocket service is available at `wss://tradin-backend-1.onrender.com`.
+
+---
+
 ## Getting Started
 
 ### Prerequisites
@@ -211,7 +221,7 @@ All endpoints are prefixed with `/api`. Authentication is required for most endp
 The server provides a WebSocket endpoint for real-time price updates.
 
 - **URL**: `ws://localhost:5000` (or your configured server address)
-- **Protocol**: `ws`
+- **Protocol**: `ws` (for local development) or `wss` (for the deployed version)
 
 ### Subscribing to Price Updates
 
