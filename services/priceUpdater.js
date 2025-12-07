@@ -50,19 +50,22 @@ async function tick(options = {}) {
   const volatility = parseFloat(process.env.PRICE_VOLATILITY || options.volatility || 0.02);
   const symbols = options.symbols || DEFAULT_SYMBOLS.map((s) => s.symbol);
   const now = new Date();
+  const today = now.toISOString().slice(0, 10); // Get 'YYYY-MM-DD' for daily OHLC tracking
   const updatedPrices = [];
 
   // Concurrently fetch all market prices from the database
   const priceDocs = await MarketPrice.find({ symbol: { $in: symbols } });
 
   // Identify symbols that need a real price fetch (not in WS cache)
-  const symbolsToFetch = symbols.filter(symbol => !latestWsPrices.has(symbol));
+  const symbolsToFetch = symbols.filter((symbol) => !latestWsPrices.has(symbol));
   const fetchedPrices = new Map();
 
   if (symbolsToFetch.length > 0) {
-    const pricePromises = symbolsToFetch.map(symbol => fetchRealPrice(symbol).then(price => ({ symbol, price })));
+    const pricePromises = symbolsToFetch.map((symbol) =>
+      fetchRealPrice(symbol).then((price) => ({ symbol, price }))
+    );
     const results = await Promise.all(pricePromises);
-    results.forEach(result => {
+    results.forEach((result) => {
       if (result.price !== null) {
         fetchedPrices.set(result.symbol, result.price);
       }
@@ -77,51 +80,91 @@ async function tick(options = {}) {
     }
 
     let newPrice;
-    const currentMarketPrice = latestWsPrices.get(symbol) || fetchedPrices.get(symbol) || randomChange(doc.price, volatility);
+    const currentMarketPrice =
+      latestWsPrices.get(symbol) || fetchedPrices.get(symbol) || randomChange(doc.price, volatility);
 
-    // Check if there's an active price manipulation
-    if (doc.manipulation && doc.manipulation.isActive) {
-      const manip = doc.manipulation;
+    // --- Daily OHLC Reset ---
+    if (doc.lastDay !== today) {
+      doc.open = currentMarketPrice;
+      doc.high = currentMarketPrice;
+      doc.low = currentMarketPrice;
+      doc.lastDay = today;
+    }
+
+    const manip = doc.manipulation;
+
+    if (manip && manip.isActive) {
       const startTime = new Date(manip.startTime);
       const endTime = new Date(manip.endTime);
 
       if (now >= startTime && now < endTime) {
-        // During manipulation period - calculate interpolated and volatile price
-        const totalDuration = endTime - startTime;
+        // --- During manipulation period ---
         const elapsed = now - startTime;
-
         newPrice = calculateManipulatedPrice(
           {
             startPrice: manip.originalPrice,
             endValue: manip.endValue,
-            durationMs: totalDuration,
+            durationMs: manip.durationMs,
           },
           elapsed
         );
 
-        // Add realistic market volatility using layered sine waves and random noise
-        const volatilityPercent = 0.002; // 0.2% fluctuation
+        // Add realistic market volatility
+        const volatilityPercent = 0.002;
         const wave1 = Math.sin(elapsed / 1000) * newPrice * volatilityPercent;
         const wave2 = Math.sin(elapsed / 500 + 1.5) * newPrice * volatilityPercent * 0.5;
         const randomNoise = (Math.random() - 0.5) * newPrice * volatilityPercent * 0.2;
         newPrice += wave1 + wave2 + randomNoise;
       } else if (now >= endTime) {
-        // Manipulation period has just ended. Revert to a real price.
-        console.log(`Price manipulation ended for ${symbol}. Reverting to real price.`);
-        doc.manipulation.isActive = false;
-        // Fetch the actual market price to restore it
-        newPrice = currentMarketPrice;
+        // --- Manipulation period has just ended, start cool-down ---
+        console.log(`Price manipulation for ${symbol} ended. Starting cool-down.`);
+        manip.isActive = false;
+        manip.isCoolingDown = true;
+        const coolDownDurationMs = manip.durationMs / 2; // Cooldown is half the manip duration
+        manip.coolDownEndTime = new Date(endTime.getTime() + coolDownDurationMs);
+        newPrice = manip.endValue; // Start cooldown from the manipulation's end value
       } else {
-        // Before manipulation starts - normal behavior
+        // Before manipulation starts
+        newPrice = currentMarketPrice;
+      }
+    } else if (manip && manip.isCoolingDown) {
+      const coolDownEndTime = new Date(manip.coolDownEndTime);
+      const coolDownStartTime = new Date(coolDownEndTime.getTime() - manip.durationMs / 2);
+
+      if (now < coolDownEndTime) {
+        // --- During cool-down period ---
+        const elapsed = now - coolDownStartTime;
+        const duration = coolDownEndTime - coolDownStartTime;
+
+        // Interpolate from manipulation end value to the real market price
+        newPrice = calculateManipulatedPrice(
+          {
+            startPrice: manip.endValue,
+            endValue: currentMarketPrice,
+            durationMs: duration,
+          },
+          elapsed
+        );
+      } else {
+        // --- Cool-down has ended ---
+        console.log(`Cool-down for ${symbol} ended. Reverting to real price.`);
+        manip.isCoolingDown = false;
+        // Reset manipulation state
+        doc.manipulation = { isActive: false, isCoolingDown: false };
         newPrice = currentMarketPrice;
       }
     } else {
-      // No active manipulation - use the latest real-time price from WebSocket
+      // --- No active manipulation ---
       newPrice = currentMarketPrice;
     }
 
     doc.price = Number(newPrice.toFixed(8));
     doc.updatedAt = now;
+
+    // --- Update High and Low ---
+    doc.high = Math.max(doc.high || doc.price, doc.price);
+    doc.low = Math.min(doc.low || doc.price, doc.price);
+
     await doc.save();
 
     // Notify the order executor of the price change
@@ -133,7 +176,6 @@ async function tick(options = {}) {
   if (wss && wss.clients.size > 0) {
     const message = JSON.stringify(updatedPrices);
     wss.clients.forEach((client) => {
-      // readyState 1 means the connection is open
       if (client.readyState === 1) {
         client.send(message);
       }
