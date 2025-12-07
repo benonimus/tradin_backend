@@ -1,294 +1,129 @@
-# Trading Backend Platform
+# Crypto Trading Backend
 
-This is the backend service for a real-time cryptocurrency trading simulation platform. It provides user authentication, portfolio management, real-time price data via WebSockets, and a RESTful API for trading, fetching chart data, and managing user balances.
-
-A unique feature of this platform is the ability for an administrator to simulate market manipulation events for specific assets, providing a controlled environment to observe market dynamics.
+This is the backend for a crypto trading application. It includes features for user authentication, balance management, trading, and a user verification system.
 
 ## Features
 
-- **User Authentication**: Secure user registration and login using JWT (JSON Web Tokens).
-- **Real-time Price Updates**: Broadcasts live cryptocurrency prices to connected clients using WebSockets.
-- **Price Feeds**: Utilizes the official Binance API for both real-time and historical cryptocurrency price data.
-- **Cryptocurrency Trading**: API endpoints for buying and selling assets.
-- **Portfolio & Balance Management**: Tracks user-owned assets, average buy price, and available USD balance.
-- **Transaction History**: Logs all deposits, withdrawals, and trades.
-- **Candlestick Chart Data**: Provides historical OHLCV (Open, High, Low, Close, Volume) data for charting libraries.
-- **Advanced Order Types**: Supports Stop-Limit, Trailing Stop, and One-Cancels-the-Other (OCO) orders via a dedicated order execution engine.
-- **Admin Price Manipulation**: A special, admin-only feature to programmatically manipulate the price of an asset over a set duration.
-
-## Tech Stack
-
-- **Backend**: Node.js, Express.js
-- **Database**: MongoDB with Mongoose ODM
-- **Real-time Communication**: WebSocket (`ws` library)
-- **Authentication**: JWT (`jsonwebtoken`), `bcryptjs` for password hashing.
-- **HTTP Requests**: `axios` for interacting with the Binance REST API.
-- **Environment Management**: `dotenv`
-
----
-
-## Live Demo
-
-The backend is deployed on Render and is accessible at the following base URL:
-
-`https://tradin-backend-1.onrender.com`
-
-All API endpoints listed below can be accessed using this URL. For example, the `/api/prices` endpoint is available at `https://tradin-backend-1.onrender.com/api/prices`. The WebSocket service is available at `wss://tradin-backend-1.onrender.com`.
-
----
+*   User registration and authentication (JWT-based)
+*   Real-time price updates via WebSockets
+*   Asset and transaction management
+*   User balance tracking
+*   Conditional order support
+*   Admin-managed user identity verification (KYC)
+*   Secure handling of user data
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js (v14 or higher)
-- MongoDB (local instance or a cloud service like MongoDB Atlas)
+*   [Node.js](https://nodejs.org/) (v14 or later)
+*   [MongoDB](https://www.mongodb.com/)
+*   A package manager like [npm](https://www.npmjs.com/)
 
-### Installation & Setup
+### Installation
 
-1.  **Clone the repository:**
+1.  Clone the repository:
     ```bash
-    git clone <your-repository-url>
-    cd tradin_backend
+    git clone https://github.com/yourname/crypto-trading-backend.git
+    cd crypto-trading-backend
     ```
 
-2.  **Install dependencies:**
+2.  Install the dependencies:
     ```bash
     npm install
     ```
 
-3.  **Create a `.env` file** in the root of the project by copying the example below. This file will store your environment variables.
+### Configuration
 
-    ```dotenv
-    # Server Configuration
+1.  Create a `.env` file in the root of the project.
+2.  Add the following environment variables:
+
+    ```env
+    MONGO_URI=your_mongodb_connection_string
+    JWT_SECRET=your_jwt_secret
+    FRONTEND_ORIGIN=http://localhost:3000
     PORT=5000
-    FRONTEND_ORIGIN=http://localhost:8080
-
-    # MongoDB Connection
-    MONGO_URI=mongodb://localhost:27017/trading_platform
-
-    # JWT Authentication
-    JWT_SECRET=your_super_secret_jwt_key
-    JWT_EXPIRES_IN=7d
-
-    # Price Service Configuration
-    LCW_API_KEY=1b0809f9-08d7-4326-9446-4e2e34150f9a
     ```
 
-4.  **Run the server:**
+### Running the Application
+
+*   To run the server in production mode:
     ```bash
     npm start
     ```
-    The server should now be running on `http://localhost:5000` (or the port you specified).
 
----
-
-## API Endpoints
-
-All endpoints are prefixed with `/api`. Authentication is required for most endpoints and is achieved by providing a JWT in the `Authorization: Bearer <token>` header.
-
-### Auth (`/api/auth`)
-
-- `POST /register`
-  - **Description**: Registers a new user.
-  - **Body**: `{ "username": "test", "email": "test@example.com", "password": "password123" }`
-  - **Response**: `{ "token": "...", "user": { ... } }`
-  - **Example Request**:
+*   To run the server in development mode with auto-reloading (`nodemon`):
     ```bash
-    curl -X POST http://localhost:5000/api/auth/register \
-      -H "Content-Type: application/json" \
-      -d '{"username": "test", "email": "test@example.com", "password": "password123"}'
+    npm run dev
     ```
 
-- `POST /login`
-  - **Description**: Logs in an existing user.
-  - **Body**: `{ "email": "test@example.com", "password": "password123" }`
-  - **Response**: `{ "token": "...", "user": { ... } }`
-  - **Example Request**:
-    ```bash
-    curl -X POST http://localhost:5000/api/auth/login \
-      -H "Content-Type: application/json" \
-      -d '{"email": "test@example.com", "password": "password123"}'
-    ```
+The server will be running on the port specified in your `.env` file (default is 5000).
 
-- `GET /me`
-  - **Description**: Retrieves the profile of the currently authenticated user.
-  - **Auth**: Required.
-  - **Response**: `{ "user": { "id": "...", "username": "...", "email": "...", "isAdmin": false, "createdAt": "ISO_DATE_STRING" } }`
-  - **Example Request**:
-    ```bash
-    curl -X GET http://localhost:5000/api/auth/me \
-      -H "Authorization: Bearer YOUR_JWT_TOKEN"
-    ```
+## API Documentation
 
-### Prices (`/api/prices`)
+The API is structured into several modules based on functionality.
 
-- `GET /`
-  - **Description**: Fetches the current market prices for all tracked symbols.
-  - **Response**: `{ "prices": [ ... ], "canManipulate": boolean }`
-  - **Example Request**:
-    ```bash
-    curl -X GET http://localhost:5000/api/prices
-    ```
+### User Verification API
 
-- `POST /manipulate`
-  - **Description**: **(Admin Only)** Sets a price manipulation schedule for a symbol.
-  - **Auth**: Required (User must be an admin).
-  - **Body**: `{ "symbol": "BTCUSDT", "startTime": "ISO_DATE_STRING", "endTime": "ISO_DATE_STRING", "endValue": 65000, "adminUserId": "...", "adminUsername": "..." }`
-  - **Response**: `{ "message": "...", "manipulation": { ... } }`
-  - **Example Request**:
-    ```bash
-    curl -X POST http://localhost:5000/api/prices/manipulate \
-      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "startTime": "2023-10-01T00:00:00Z", "endTime": "2023-10-01T01:00:00Z", "endValue": 65000, "adminUserId": "63f...", "adminUsername": "admin"}'
-    ```
+This API provides a workflow for user identity verification, managed by an administrator.
 
-### Charts (`/api/charts`)
+#### Verification Workflow
 
-- `GET /klines`
-  - **Description**: Provides historical candlestick data for a given symbol.
-  - **Query Params**:
-    - `symbol` (required): e.g., `BTCUSDT`
-    - `interval` (required): e.g., `1h`, `4h`, `1d`
-    - `limit` (optional): Number of candles, defaults to 100.
-  - **Response**: `{ "symbol": "...", "interval": "...", "data": [ { "time": UNIX_TS, "open": ..., ... } ] }`
-  - **Example Request**:
-    ```bash
-    curl -X GET "http://localhost:5000/api/charts/klines?symbol=BTCUSDT&interval=1h&limit=50"
-    ```
+1.  An authenticated user submits an ID document (e.g., a photo of a driver's license) via the `POST /api/users/me/submit-verification` endpoint. The user's verification status is changed to `pending`.
+2.  An administrator retrieves a list of all users with a `pending` verification status using the `GET /api/admin/users/pending-verification` endpoint.
+3.  The administrator reviews the submitted document and approves or rejects the verification request using the `PUT /api/admin/users/:userId/verify` endpoint.
+4.  The user's verification status is updated to `verified` or `rejected`.
 
-### Balance (`/api/balance`)
+#### User Model Changes
 
-- `GET /`
-  - **Description**: Gets the current user's USD balance.
-  - **Auth**: Required.
-  - **Response**: `{ "balance": 10000, "currency": "USD", "availableBalance": 10000, "lockedBalance": 0 }`
- 
-- `POST /deposit`
-  - **Description**: Deposits funds into the user's account.
-  - **Auth**: Required.
-  - **Body**: `{ "amount": 500 }`
-  - **Response**: `{ "success": true, "newBalance": 10500, ... }`
+The `User` model has been updated with the following fields to support verification:
 
-- `POST /withdraw`
-  - **Description**: Withdraws funds from the user's account.
-  - **Auth**: Required.
-  - **Body**: `{ "amount": 100 }`
-  - **Response**: `{ "success": true, "newBalance": 10400, ... }`
+*   `verification`: An object containing:
+    *   `status` (String): The user's verification status. Can be `unverified`, `pending`, `verified`, or `rejected`. Defaults to `unverified`.
+    *   `idPhoto` (String): A data URI containing the uploaded ID document.
+    *   `rejectionReason` (String): A reason for why the verification was rejected.
+*   `twoFactor`: An object for 2FA (Two-Factor Authentication):
+    *   `enabled` (Boolean): Whether 2FA is enabled. Defaults to `false`.
+    *   `secret` (String): The 2FA secret key.
 
-### Trade (`/api/trade`)
+#### Endpoints
 
-- `GET /`
-  - **Description**: Lists all assets in the user's portfolio.
-  - **Auth**: Required.
-  - **Response**: `{ "assets": [ ... ], "portfolioValue": ..., ... }`
-  - **Example Request**:
-    ```bash
-    curl -X GET http://localhost:5000/api/trade \
-      -H "Authorization: Bearer YOUR_JWT_TOKEN"
-    ```
+**User Endpoint**
 
-- `POST /buy`
-  - **Description**: Executes a buy order.
-  - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.1 }`
-  - **Response**: `{ "success": true, "tradeId": "...", ... }`
-  - **Example Request**:
-    ```bash
-    curl -X POST http://localhost:5000/api/trade/buy \
-      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "amount": 0.1}'
-    ```
+*   **Submit Verification Document**
+    *   **Method**: `POST`
+    *   **Path**: `/api/users/me/submit-verification`
+    *   **Access**: Private (requires user authentication)
+    *   **Description**: Allows a user to submit an ID document for verification. The request body must be `multipart/form-data` with a single file field named `idPhoto`.
+    *   **Success Response**: `200 OK` with a confirmation message.
+    *   **Error Responses**: `400 Bad Request` if no file is uploaded, or if verification is already pending/verified.
 
-- `POST /sell`
-  - **Description**: Executes a sell order.
-  - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.05 }`
-  - **Response**: `{ "success": true, "tradeId": "...", ... }`
-  - **Example Request**:
-    ```bash
-    curl -X POST http://localhost:5000/api/trade/sell \
-      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "amount": 0.05}'
-    ```
+**Admin Endpoints**
 
-- `POST /buy`
-  - **Description**: Executes a buy order.
-  - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.1 }`
-  - **Response**: `{ "success": true, "tradeId": "...", ... }`
-  - **Example Request**:
-    ```bash
-    curl -X POST http://localhost:5000/api/trade/buy \
-      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "amount": 0.1}'
-    ```
+*   **Get Pending Verifications**
+    *   **Method**: `GET`
+    *   **Path**: `/api/admin/users/pending-verification`
+    *   **Access**: Private (requires admin privileges)
+    *   **Description**: Retrieves a list of all users whose verification status is `pending`.
+    *   **Success Response**: `200 OK` with an array of user objects.
 
-- `POST /sell`
-  - **Description**: Executes a sell order.
-  - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "amount": 0.05 }`
-  - **Response**: `{ "success": true, "tradeId": "...", ... }`
-  - **Example Request**:
-    ```bash
-    curl -X POST http://localhost:5000/api/trade/sell \
-      -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-      -H "Content-Type: application/json" \
-      -d '{"symbol": "BTCUSDT", "amount": 0.05}'
-    ```
-
-- `POST /stop-limit`
-  - **Description**: Places a conditional Stop-Limit order.
-  - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "side": "SELL", "amount": 0.1, "stopPrice": 49000, "limitPrice": 48950 }`
-
-- `POST /trailing-stop`
-  - **Description**: Places a conditional Trailing Stop order.
-  - **Auth**: Required.
-  - **Body**: `{ "symbol": "BTCUSDT", "side": "SELL", "amount": 0.1, "trailingDelta": { "type": "PERCENTAGE", "value": 5 } }`
-
-- `GET /orders`
-  - **Description**: Retrieves all active conditional orders for the user.
-  - **Auth**: Required.
-
-- `DELETE /orders/:id`
-  - **Description**: Cancels an active conditional order.
-  - **Auth**: Required.
-
----
-
-## WebSocket Service
-
-The server provides a WebSocket endpoint for real-time price updates.
-
-- **URL**: `ws://localhost:5000` (or your configured server address)
-- **Protocol**: `ws` (for local development) or `wss` (for the deployed version)
-
-### Subscribing to Price Updates
-
-Simply connect a WebSocket client to the server's root URL. Once connected, the server will automatically push an array of updated price objects at regular intervals.
-
-**Example Message (Client Receives):**
-
-```json
-[
-  {
-    "_id": "62c4a1b1...",
-    "symbol": "BTCUSDT",
-    "price": 40015.72,
-    "updatedAt": "2025-11-29T23:39:49.000Z",
-    "manipulation": { ... }
-  },
-  {
-    "_id": "62c4a1b2...",
-    "symbol": "ETHUSDT",
-    "price": 2501.18,
-    "updatedAt": "2025-11-29T23:39:49.000Z",
-    "manipulation": { ... }
-  }
-]
-```
+*   **Verify or Reject a User**
+    *   **Method**: `PUT`
+    *   **Path**: `/api/admin/users/:userId/verify`
+    *   **Access**: Private (requires admin privileges)
+    *   **Description**: Updates a user's verification status.
+    *   **Request Body**:
+        ```json
+        {
+          "status": "verified"
+        }
+        ```
+        or
+        ```json
+        {
+          "status": "rejected",
+          "rejectionReason": "The ID document was not clear."
+        }
+        ```
+    *   **Success Response**: `200 OK` with the updated user object.
+    *   **Error Responses**: `400 Bad Request` for invalid status or missing rejection reason. `404 Not Found` if the user does not exist.

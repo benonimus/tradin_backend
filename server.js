@@ -53,6 +53,8 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/trade', require('./routes/trade'));
 app.use('/api/charts', require('./routes/charts'));
 app.use('/api/prices', require('./routes/prices'));
+app.use('/api/admin', require('./routes/admin'));
+app.use('/api/users', require('./routes/users'));
 
 const PORT = process.env.PORT || 5000;
 

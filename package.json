@@ -29,6 +29,7 @@
     "express-rate-limit": "^6.7.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^7.5.0",
+    "multer": "^2.0.2",
     "ws": "^8.18.3"
   },
   "devDependencies": {

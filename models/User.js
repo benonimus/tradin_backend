@@ -27,6 +27,28 @@ const UserSchema = new mongoose.Schema({
     required: true,
     default: false,
   },
+  verification: {
+    status: {
+      type: String,
+      enum: ['unverified', 'pending', 'verified', 'rejected'],
+      default: 'unverified',
+    },
+    idPhoto: {
+      type: String,
+    },
+    rejectionReason: {
+      type: String,
+    },
+  },
+  twoFactor: {
+    enabled: {
+      type: Boolean,
+      default: false,
+    },
+    secret: {
+      type: String,
+    },
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', UserSchema);
