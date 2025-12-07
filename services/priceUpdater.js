@@ -1,6 +1,7 @@
 const MarketPrice = require('../models/MarketPrice');
 const axios = require('axios');
 const WebSocket = require('ws');
+const { calculateManipulatedPrice } = require('../utils/priceManipulation');
 
 const orderExecutor = require('./orderExecutor');
 let intervalHandle = null;
@@ -35,30 +36,6 @@ function randomChange(price, volatility) {
   return Math.max(0.00000001, price * (1 + pct));
 }
 
-/**
- * Calculates a manipulated price based on an easing curve and simulated volatility.
- * @param {object} config - The manipulation configuration.
- * @param {number} elapsed - Milliseconds since manipulation started.
- * @returns {number} The calculated manipulated price.
- */
-function calculateManipulatedPrice(config, elapsed) {
-  const { startPrice, endValue, durationMs } = config;
-  const progress = Math.min(elapsed / durationMs, 1);
-
-  // Natural ease-in-out quadratic curve for smooth price movement
-  const easeProgress = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
-
-  const basePrice = startPrice + (endValue - startPrice) * easeProgress;
-
-  // Add realistic market volatility using layered sine waves and random noise
-  const volatilityPercent = 0.002; // 0.2% fluctuation
-  const wave1 = Math.sin(elapsed / 1000) * basePrice * volatilityPercent;
-  const wave2 = Math.sin(elapsed / 500 + 1.5) * basePrice * volatilityPercent * 0.5;
-  const randomNoise = (Math.random() - 0.5) * basePrice * volatilityPercent * 0.2;
-
-  return basePrice + wave1 + wave2 + randomNoise;
-}
-
 async function seedIfEmpty(symbols) {
   for (const s of symbols) {
     const existing = await MarketPrice.findOne({ symbol: s.symbol });
@@ -72,21 +49,35 @@ async function tick(options = {}) {
   const { wss } = options;
   const volatility = parseFloat(process.env.PRICE_VOLATILITY || options.volatility || 0.02);
   const symbols = options.symbols || DEFAULT_SYMBOLS.map((s) => s.symbol);
-
-  const prices = await MarketPrice.find({ symbol: { $in: symbols } });
   const now = new Date();
   const updatedPrices = [];
 
-  // update each symbol
+  // Concurrently fetch all market prices from the database
+  const priceDocs = await MarketPrice.find({ symbol: { $in: symbols } });
+
+  // Identify symbols that need a real price fetch (not in WS cache)
+  const symbolsToFetch = symbols.filter(symbol => !latestWsPrices.has(symbol));
+  const fetchedPrices = new Map();
+
+  if (symbolsToFetch.length > 0) {
+    const pricePromises = symbolsToFetch.map(symbol => fetchRealPrice(symbol).then(price => ({ symbol, price })));
+    const results = await Promise.all(pricePromises);
+    results.forEach(result => {
+      if (result.price !== null) {
+        fetchedPrices.set(result.symbol, result.price);
+      }
+    });
+  }
+
   for (const symbol of symbols) {
-    let doc = prices.find((p) => p.symbol === symbol);
+    let doc = priceDocs.find((p) => p.symbol === symbol);
     if (!doc) {
-      // If missing, create with a reasonable default
       const defaultObj = DEFAULT_SYMBOLS.find((d) => d.symbol === symbol) || { price: 100 };
       doc = new MarketPrice({ symbol, price: defaultObj.price });
     }
 
     let newPrice;
+    const currentMarketPrice = latestWsPrices.get(symbol) || fetchedPrices.get(symbol) || randomChange(doc.price, volatility);
 
     // Check if there's an active price manipulation
     if (doc.manipulation && doc.manipulation.isActive) {
@@ -107,20 +98,26 @@ async function tick(options = {}) {
           },
           elapsed
         );
+
+        // Add realistic market volatility using layered sine waves and random noise
+        const volatilityPercent = 0.002; // 0.2% fluctuation
+        const wave1 = Math.sin(elapsed / 1000) * newPrice * volatilityPercent;
+        const wave2 = Math.sin(elapsed / 500 + 1.5) * newPrice * volatilityPercent * 0.5;
+        const randomNoise = (Math.random() - 0.5) * newPrice * volatilityPercent * 0.2;
+        newPrice += wave1 + wave2 + randomNoise;
       } else if (now >= endTime) {
         // Manipulation period has just ended. Revert to a real price.
         console.log(`Price manipulation ended for ${symbol}. Reverting to real price.`);
         doc.manipulation.isActive = false;
         // Fetch the actual market price to restore it
-        newPrice = (await fetchRealPrice(symbol)) || doc.price;
+        newPrice = currentMarketPrice;
       } else {
         // Before manipulation starts - normal behavior
-        newPrice = latestWsPrices.get(symbol) || (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
+        newPrice = currentMarketPrice;
       }
     } else {
       // No active manipulation - use the latest real-time price from WebSocket
-      newPrice = latestWsPrices.get(symbol) || (await fetchRealPrice(symbol)) || randomChange(doc.price, volatility);
-      // Fallback to random change if WebSocket price is not available yet
+      newPrice = currentMarketPrice;
     }
 
     doc.price = Number(newPrice.toFixed(8));
@@ -218,4 +215,4 @@ function stop() {
   console.log('Price updater stopped');
 }
 
-module.exports = { start, stop, tick };
+module.exports = { start, stop, tick, calculateManipulatedPrice };

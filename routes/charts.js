@@ -3,6 +3,7 @@ const axios = require('axios');
 // Assuming the Manipulation model is located at the specified path
 const Manipulation = require('../models/Manipulation');
 const router = express.Router();
+const { calculateManipulatedPrice } = require('../utils/priceManipulation');
 
 // Environment variables
 const LCW_API_KEY = process.env.LCW_API_KEY;
@@ -20,6 +21,94 @@ const intervalToMs = (interval) => {
   };
   return value * (multipliers[unit] || 0);
 };
+
+// --- Data Fetching Functions ---
+
+/**
+ * Fetches kline data from LiveCoinWatch.
+ */
+async function fetchFromLCW(symbol, interval, startTime, endTime) {
+  const intervalToSeconds = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
+  if (!LCW_API_KEY || !intervalToSeconds[interval]) {
+    return null;
+  }
+
+  try {
+    const code = symbol.replace(/USDT$|USD$/i, '');
+    const body = {
+      currency: 'USD',
+      code,
+      start: Math.floor(startTime / 1000),
+      end: Math.floor(endTime / 1000),
+      meta: true,
+    };
+
+    console.log(`[CHARTS] Attempting to fetch from LiveCoinWatch for ${symbol}`);
+    const response = await axios.post(LCW_HISTORY_URL, body, {
+      headers: { 'x-api-key': LCW_API_KEY, 'Content-Type': 'application/json' },
+      timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
+    });
+
+    let payload = response.data?.history || response.data?.data || response.data;
+    if (!payload || !Array.isArray(payload) || payload.length === 0) {
+      console.log(`[CHARTS] LiveCoinWatch returned no data for ${symbol}.`);
+      return [];
+    }
+
+    // Normalize LCW response to Binance kline format: [time, open, high, low, close, volume]
+    const klines = payload.map((item) => {
+      if (Array.isArray(item)) {
+        // Array format: [timestamp, open, high, low, close, volume]
+        const ts = Number(item[0]) < 1e12 ? Number(item[0]) * 1000 : Number(item[0]);
+        return [ts, item[1].toString(), item[2].toString(), item[3].toString(), item[4].toString(), (item[5] || '0').toString()];
+      } else if (typeof item === 'object') {
+        // Object format
+        const tsRaw = item.date || item.time || item.t || item.timestamp;
+        let ts = Number(tsRaw || 0);
+        if (ts && ts < 1e12) ts *= 1000;
+        return [
+          ts,
+          (item.open || item.o || 0).toString(),
+          (item.high || item.h || 0).toString(),
+          (item.low || item.l || 0).toString(),
+          (item.close || item.c || 0).toString(),
+          (item.volume || item.v || 0).toString(),
+        ];
+      }
+      return null;
+    }).filter(Boolean);
+
+    console.log(`[CHARTS] Fetched ${klines.length} candles from LiveCoinWatch.`);
+    return klines;
+  } catch (err) {
+    console.error('[CHARTS] LiveCoinWatch request failed:', err?.message || err);
+    return null; // Return null on failure to trigger fallback
+  }
+}
+
+/**
+ * Fetches kline data from Binance.
+ */
+async function fetchFromBinance(symbol, interval, limit, startTime) {
+  try {
+    console.log(`[CHARTS] Fetching from Binance API for ${symbol}`);
+    const response = await axios.get('https://api.binance.com/api/v3/klines', {
+      params: { symbol, interval, limit, startTime },
+      timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
+    });
+
+    if (response.data && response.data.length > 0) {
+      console.log(`[CHARTS] Fetched ${response.data.length} candles from Binance.`);
+      return response.data;
+    } else {
+      console.log(`[CHARTS] Binance API returned no data for ${symbol}`);
+      return [];
+    }
+  } catch (err) {
+    console.error('[CHARTS] Binance API request failed:', err?.message || err);
+    return null; // Return null on failure
+  }
+}
 
 // Fetch klines (candlestick) data from Binance or LiveCoinWatch
 router.get('/klines', async (req, res) => {
@@ -63,83 +152,14 @@ router.get('/klines', async (req, res) => {
   }
 
   try {
-    // Try LiveCoinWatch history endpoint when key is present and interval supported
-    let data = null;
-    const intervalToSeconds = {
-      '1m': 60,
-      '5m': 300,
-      '15m': 900,
-      '1h': 3600,
-      '4h': 14400,
-      '1d': 86400,
-      // LCW history API does not reliably support '1w' or longer
-    };
+    // Strategy: Try LCW first, if it fails (returns null) or is not configured, fall back to Binance.
+    let data = await fetchFromLCW(normalizedSymbol, interval, startTimeForKlines, now);
 
-    if (LCW_API_KEY && Object.prototype.hasOwnProperty.call(intervalToSeconds, interval)) {
-      try {
-        const step = intervalToSeconds[interval];
-        const end = Math.floor(now / 1000); // Use calculated 'now'
-        const start = Math.floor(startTimeForKlines / 1000); // Use calculated chart start time
-        const code = (normalizedSymbol || '').replace(/USDT$|USD$/i, '');
-
-        const body = { currency: 'USD', code, start, end, step };
-        let lcwResp = null;
-        try {
-          lcwResp = await axios.post(LCW_HISTORY_URL, body, {
-            headers: { 'x-api-key': LCW_API_KEY, 'Content-Type': 'application/json' },
-            timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
-          });
-        } catch (err) {
-          console.error('[CHARTS] LiveCoinWatch history request failed:', err?.message || err);
-          lcwResp = null;
-        }
-
-        if (lcwResp && lcwResp.data) {
-          let payload = lcwResp.data;
-          if (payload.data) payload = payload.data;
-
-          // payload may be array-of-arrays [[ts, o, h, l, c, v], ...] or array-of-objects
-          if (Array.isArray(payload) && payload.length > 0) {
-            if (Array.isArray(payload[0])) {
-              data = payload.map((c) => [Number(c[0]) < 1e12 ? Number(c[0]) * 1000 : Number(c[0]), c[1].toString(), c[2].toString(), c[3].toString(), c[4].toString(), (c[5] || '0').toString()]);
-            } else if (typeof payload[0] === 'object') {
-              data = payload.map((o) => {
-                const tsRaw = o.time || o.t || o.timestamp || o[0];
-                let ts = Number(tsRaw || 0);
-                if (ts && ts < 1e12) ts = ts * 1000;
-                return [ts, (o.open || o.o || o.O || 0).toString(), (o.high || o.h || o.H || 0).toString(), (o.low || o.l || o.L || 0).toString(), (o.close || o.c || o.C || 0).toString(), (o.volume || o.v || 0).toString()];
-              });
-            }
-          }
-        }
-      } catch (err) {
-        console.error('[CHARTS] LiveCoinWatch processing error:', err?.message || err);
-      }
+    if (data === null) {
+      // A null response indicates a failure, so we fall back. An empty array is a valid response.
+      data = await fetchFromBinance(normalizedSymbol, interval, limitNum, startTimeForKlines);
     }
 
-    // If LCW didn't provide data, fall back to Binance
-    if (!data) {
-      console.log(`[CHARTS] Falling back to Binance API for ${normalizedSymbol}`);
-      try {
-        const response = await axios.get(`https://api.binance.com/api/v3/klines`, {
-          params: {
-            symbol: normalizedSymbol,
-            interval: interval,
-            limit: limitNum,
-            startTime: startTimeForKlines, // Request data starting from calculated time
-          },
-          timeout: parseInt(process.env.PRICE_FETCH_TIMEOUT_MS || '5000', 10),
-        });
-        if (response.data && response.data.length > 0) {
-          data = response.data;
-          console.log(`[CHARTS] Fetched ${data.length} candles from Binance.`);
-        } else {
-          console.log(`[CHARTS] Binance API returned no data for ${normalizedSymbol}`);
-        }
-      } catch (err) {
-        console.error('[CHARTS] Binance API request failed:', err?.message || err);
-      }
-    }
 
     if (!data || data.length === 0) {
       return res.status(503).json({ message: 'Could not fetch chart data from external providers.', data: [] });
@@ -175,18 +195,20 @@ router.get('/klines', async (req, res) => {
             const timeIntoManip = candleTimestamp - manipStartTime;
 
             // Calculate progress (clamped between 0 and 1)
-            const progress = Math.max(0, Math.min(1, timeIntoManip / (manipDuration || 1)));
-
-            // Interpolate price based on the candle's open price as the starting point
-            // This mirrors the logic in your first snippet.
-            const startPrice = candle.open;
-            const targetPrice = manip.endValue;
-
-            const manipulatedPrice = startPrice + (targetPrice - startPrice) * progress;
+            // Use the same logic as the real-time price updater for consistency.
+            const manipulatedPrice = calculateManipulatedPrice(
+              {
+                startPrice: manip.originalPrice,
+                endValue: manip.endValue,
+                durationMs: manipDuration,
+              },
+              timeIntoManip
+            );
 
             // Adjust OHLC values. Close is the interpolated price. High/Low must encompass it.
+            // The open price of the candle remains the real market open.
             candle.close = manipulatedPrice;
-            candle.high = Math.max(candle.high, manipulatedPrice);
+            candle.high = Math.max(candle.high, candle.open, manipulatedPrice);
             candle.low = Math.min(candle.low, manipulatedPrice);
 
             // Since manipulations are sorted, we can stop at the last applicable one
